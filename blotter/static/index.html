@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blotter</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <h1 class="mark">Blotter</h1>
+  <button type="button" id="keys-button" class="link">Keys</button>
+</header>
+
+<main>
+  <section id="keys" class="panel" hidden>
+    <h2>API keys</h2>
+    <p>Blotter asks two free online databases about your files. Each needs a free key from its website.
+      Keys are kept in Windows Credential Manager on this PC, never in a file.</p>
+    <form id="keys-form" autocomplete="off">
+      <div class="key-row" data-service="virustotal">
+        <label for="key-virustotal">VirusTotal API key</label>
+        <p class="hint">Sign up at virustotal.com, then open your profile menu and choose "API key".</p>
+        <div class="key-line">
+          <input id="key-virustotal" type="password" spellcheck="false" placeholder="not set">
+          <span class="key-state"></span>
+          <button type="button" class="link remove" hidden>Remove</button>
+        </div>
+      </div>
+      <div class="key-row" data-service="malwarebazaar">
+        <label for="key-malwarebazaar">MalwareBazaar Auth-Key</label>
+        <p class="hint">Sign in at auth.abuse.ch (abuse.ch's account page) and copy your Auth-Key.</p>
+        <div class="key-line">
+          <input id="key-malwarebazaar" type="password" spellcheck="false" placeholder="not set">
+          <span class="key-state"></span>
+          <button type="button" class="link remove" hidden>Remove</button>
+        </div>
+      </div>
+      <p id="keys-message" class="message" role="status"></p>
+      <div class="actions">
+        <button type="submit" class="button">Save keys</button>
+        <button type="button" id="keys-close" class="link">Close</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="drop" class="drop" tabindex="0" role="button" aria-label="Choose a file to check">
+    <p class="drop-title">Drop a file here</p>
+    <p class="drop-sub">or <span class="underline">choose a file</span></p>
+    <input id="picker" type="file" hidden>
+  </section>
+
+  <section id="result" hidden aria-live="polite">
+    <article id="card" class="card">
+      <p class="card-file" id="card-file"></p>
+      <h2 class="card-verdict" id="card-verdict"></h2>
+      <p class="card-summary" id="card-summary"></p>
+      <ul class="card-reasons" id="card-reasons"></ul>
+      <ul class="progress" id="progress"></ul>
+      <details id="details">
+        <summary>Details</summary>
+        <dl class="facts">
+          <dt>SHA-256</dt><dd class="mono" id="d-sha"></dd>
+          <dt>Size</dt><dd id="d-size"></dd>
+        </dl>
+        <div id="d-checks"></div>
+        <button type="button" id="again" class="button" hidden>Check again online</button>
+        <p class="hint" id="again-hint" hidden>Online answers are remembered so a second scan costs no quota.
+          This asks VirusTotal and MalwareBazaar again.</p>
+      </details>
+    </article>
+  </section>
+
+  <section class="how">
+    <h2>How Blotter checks a file</h2>
+    <ol>
+      <li>It reads the file's bytes and works out its fingerprint (SHA-256). It never opens or runs the file.</li>
+      <li>It asks VirusTotal and MalwareBazaar whether they know that fingerprint.
+        Only the fingerprint is sent. The file itself is never uploaded.</li>
+      <li>Microsoft Defender scans the file here on this PC. If Defender finds a threat it quarantines Blotter's copy,
+        and Blotter shows that as a detection.</li>
+    </ol>
+    <dl class="legend">
+      <dt>Malicious</dt><dd>At least one check recognises the file as malware.</dd>
+      <dt>Suspicious</dt><dd>A warning sign, such as one or two antivirus engines out of many.</dd>
+      <dt>No known detections</dt><dd>Nothing recognised it. That is not a promise the file is harmless.</dd>
+      <dt>Couldn't check</dt><dd>No check could run (no internet, no keys, Defender off).</dd>
+    </dl>
+    <h2>Try it</h2>
+    <p>EICAR is a standard test file that every antivirus is built to detect. It contains no real malware.
+      Blotter should call it Malicious, and Defender will quarantine Blotter's copy.</p>
+    <button type="button" id="eicar" class="button">Check the EICAR test file</button>
+  </section>
+</main>
+</body>
+</html>

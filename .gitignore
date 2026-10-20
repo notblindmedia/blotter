@@ -1,0 +1,7 @@
+# private Python folder made by setup.bat
+.venv/
+__pycache__/
+*.pyc
+# never commit keys or scanned files
+.env
+*.blotter
