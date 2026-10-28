@@ -30,6 +30,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .link { background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 .button { background: var(--ink); color: var(--paper); border: 1px solid var(--ink); padding: 8px 16px; }
 .button:hover { background: var(--paper); color: var(--ink); }
+a.button { display: inline-block; text-decoration: none; }
+.button.ghost { background: var(--paper); color: var(--ink); }
+.button.ghost:hover { background: var(--ink); color: var(--paper); }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
 .panel { border: 1px solid var(--ink); padding: 20px; margin-bottom: 24px; display: grid; gap: 14px; }
@@ -45,6 +48,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .key-state { font-size: 14px; color: var(--mute); }
 .actions { display: flex; gap: 20px; align-items: center; }
 .message { min-height: 1.5em; font-size: 14px; }
+.panel h3 { margin: 0 0 4px; font-size: 15px; }
+.sub { border-top: 1px solid var(--faint); padding-top: 14px; display: grid; gap: 6px; justify-items: start; }
+.toggle { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }
+.plain li { word-break: break-all; }
+.mono-list { font: 12px/1.5 var(--mono); color: var(--mute); }
+#welcome { display: grid; gap: 8px; }
+
+.by-path { display: grid; gap: 8px; margin-top: 12px; justify-items: start; }
+.path-form { display: flex; gap: 12px; width: 100%; align-items: center; }
+.path-form input {
+  flex: 1 1 auto; min-width: 0; font: 13px var(--mono); padding: 7px 8px;
+  color: var(--ink); background: var(--paper); border: 1px solid var(--ink); border-radius: 0;
+}
 
 .drop {
   border: 1px dashed var(--ink); padding: 56px 16px; text-align: center; cursor: pointer;
@@ -65,8 +82,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .card.v-malicious { background: var(--ink); color: var(--paper); }
 .card.v-malicious .card-file, .card.v-malicious .hint { color: inherit; opacity: 0.75; }
 .card.v-malicious .button { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+.card.v-malicious .button.ghost { background: var(--ink); color: var(--paper); }
 .card.v-suspicious { border-width: 4px; }
-.card.v-couldnt_check { border-style: dashed; }
+.card.v-unusual { border-style: double; border-width: 4px; }
+.card-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
+.vt-state { font-size: 14px; opacity: 0.8; margin-right: 8px; }
+.card.v-couldnt_check, .card.v-couldnt_fully_check { border-style: dashed; }
 .card.running .card-verdict { opacity: 0.5; }
 
 .progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }

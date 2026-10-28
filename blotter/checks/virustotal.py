@@ -10,7 +10,7 @@ import aiohttp
 import vt
 
 from .. import hashing, keys
-from ..findings import CLEAR, ERROR, MALICIOUS, SUSPICIOUS, UNKNOWN, Finding
+from ..findings import CLEAR, ERROR, MALICIOUS, SKIPPED, SUSPICIOUS, UNKNOWN, UNKNOWN_ONLINE, Finding
 
 ID = "virustotal"
 NAME = "VirusTotal"
@@ -55,7 +55,11 @@ limiter = RateLimiter(PER_MINUTE)
 def scan(path) -> list[Finding]:
     key = keys.get(ID)
     if not key:
-        return [Finding(ID, ERROR, "VirusTotal wasn't checked because no API key is set (see Keys at the top).")]
+        # "Not checked", never "never seen": without a key Blotter knows nothing about what VirusTotal has
+        # seen, so this carries no UNKNOWN_ONLINE signal and can't raise the verdict.
+        return [Finding(ID, SKIPPED, "VirusTotal wasn't asked because no API key is set (optional, see Settings). "
+                                     "\"Open on VirusTotal\" looks the file up in your browser instead.",
+                        {"not_checked": "no_key"})]
     sha = hashing.sha256_file(path)
     if not limiter.acquire(MAX_WAIT):
         return [Finding(ID, ERROR, "VirusTotal wasn't checked: the limit of 4 lookups a minute is used up. Try again in a minute.")]
@@ -70,7 +74,7 @@ def scan(path) -> list[Finding]:
     if data is None:
         return [Finding(ID, UNKNOWN,
                         "VirusTotal has no record of this file, so no antivirus engines there have looked at it.",
-                        {"link": _link(sha)})]
+                        {"link": _link(sha)}, [UNKNOWN_ONLINE])]
     return interpret(sha, data)
 
 

@@ -8,7 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..findings import CLEAR, ERROR, MALICIOUS, Finding
+from ..findings import CLEAR, ERROR, MALICIOUS, UNCHECKED, Finding
 
 ID = "defender"
 NAME = "Microsoft Defender"
@@ -16,6 +16,7 @@ ORDER = 30
 TIMEOUT = 180
 CACHE = False          # local and free, and definitions update daily: always scan again
 NEEDS_FILE = True
+SANDBOX = False        # hands the file to Defender's service; doesn't parse it itself
 
 SCAN_TIMEOUT = TIMEOUT - 10
 EXE_NAME = "MpCmdRun.exe"
@@ -78,7 +79,8 @@ def scan(path) -> list[Finding]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
-        return [Finding(ID, ERROR, f"Microsoft Defender took longer than {SCAN_TIMEOUT} seconds, so the scan was stopped.")]
+        return [Finding(ID, ERROR, f"Microsoft Defender took longer than {SCAN_TIMEOUT} seconds, so the scan was stopped.",
+                        {}, [UNCHECKED])]
     except OSError as e:
         return [Finding(ID, ERROR, f"Microsoft Defender's scanner couldn't be started ({e.strerror or e}).")]
     output = (_decode(proc.stdout) + "\n" + _decode(proc.stderr)).strip()

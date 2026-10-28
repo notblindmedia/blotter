@@ -10,15 +10,23 @@
 <body>
 <header class="top">
   <h1 class="mark">Blotter</h1>
-  <button type="button" id="keys-button" class="link">Keys</button>
+  <button type="button" id="settings-button" class="link">Settings</button>
 </header>
 
 <main>
-  <section id="keys" class="panel" hidden>
-    <h2>API keys</h2>
-    <p>Blotter asks two free online databases about your files. Each needs a free key from its website.
-      Keys are kept in Windows Credential Manager on this PC, never in a file.</p>
+  <section id="settings" class="panel" hidden>
+    <div id="welcome" hidden>
+      <h2>Welcome to Blotter</h2>
+      <p>Blotter works right away, with no account: it checks what a file really is, what it can do,
+        and runs ClamAV and Microsoft Defender on this PC.</p>
+      <p>Optional: two free keys add VirusTotal (about 70 antivirus engines) and MalwareBazaar
+        (a public list of known malware). Only a file's fingerprint is ever sent. You can add them later under Settings.</p>
+    </div>
+    <h2 id="settings-title">Settings</h2>
+
     <form id="keys-form" autocomplete="off">
+      <h3>API keys (optional)</h3>
+      <p class="hint">Keys are kept in Windows Credential Manager on this PC, never in a file.</p>
       <div class="key-row" data-service="virustotal">
         <label for="key-virustotal">VirusTotal API key</label>
         <p class="hint">Sign up at virustotal.com, then open your profile menu and choose "API key".</p>
@@ -40,16 +48,59 @@
       <p id="keys-message" class="message" role="status"></p>
       <div class="actions">
         <button type="submit" class="button">Save keys</button>
-        <button type="button" id="keys-close" class="link">Close</button>
+        <button type="button" id="skip" class="button ghost" hidden>Skip for now</button>
+        <button type="button" id="settings-close" class="link">Close</button>
       </div>
     </form>
+
+    <section class="sub">
+      <h3>ClamAV</h3>
+      <label class="toggle"><input type="checkbox" id="clamav-on"> Run ClamAV while Blotter is open</label>
+      <p class="hint" id="clamav-state"></p>
+    </section>
+
+    <section class="sub">
+      <h3>Sandbox</h3>
+      <p class="hint" id="sandbox-state"></p>
+    </section>
+
+    <section class="sub">
+      <h3>Rules</h3>
+      <p class="hint" id="rules-state"></p>
+      <button type="button" id="update-rules" class="button ghost">Update rules now</button>
+    </section>
+
+    <section class="sub">
+      <h3>Files you trust</h3>
+      <ul id="trusted" class="plain"></ul>
+    </section>
+
+    <section class="sub">
+      <h3>Quarantine</h3>
+      <ul id="quarantined" class="plain"></ul>
+    </section>
+
+    <section class="sub">
+      <h3>Internet addresses Blotter uses</h3>
+      <p class="hint">Lookups send only a file's fingerprint (SHA-256). Downloads fetch rules and ClamAV;
+        they send nothing about your files. Blotter refuses any other address.</p>
+      <ul id="addresses" class="plain mono-list"></ul>
+    </section>
   </section>
 
-  <section id="drop" class="drop" tabindex="0" role="button" aria-label="Choose a file to check">
+  <section id="drop" class="drop" tabindex="0" role="button" aria-label="Drop a file to check">
     <p class="drop-title">Drop a file here</p>
-    <p class="drop-sub">or <span class="underline">choose a file</span></p>
+    <p class="drop-sub">or <span class="underline">choose a file</span> (Blotter checks a copy)</p>
     <input id="picker" type="file" hidden>
   </section>
+  <div class="by-path">
+    <button type="button" id="pick-local" class="button ghost">Choose a file on this PC…</button>
+    <form id="path-form" class="path-form">
+      <input id="path-input" type="text" spellcheck="false" placeholder="or paste a path, e.g. C:\Users\you\Downloads\setup.exe">
+      <button type="submit" class="link">Check</button>
+    </form>
+    <p class="hint">Files chosen this way can be quarantined from the result, because Blotter knows where they are.</p>
+  </div>
 
   <section id="result" hidden aria-live="polite">
     <article id="card" class="card">
@@ -58,16 +109,30 @@
       <p class="card-summary" id="card-summary"></p>
       <ul class="card-reasons" id="card-reasons"></ul>
       <ul class="progress" id="progress"></ul>
+      <div class="card-actions" id="card-actions" hidden>
+        <a id="open-vt" class="button" target="_blank" rel="noopener noreferrer">Open on VirusTotal</a>
+        <span id="vt-state" class="vt-state"></span>
+        <button type="button" id="trust" class="button ghost">Trust this file</button>
+        <button type="button" id="quarantine" class="button ghost" hidden>Quarantine</button>
+      </div>
+      <form id="password-form" class="path-form" autocomplete="off" hidden>
+        <label for="archive-password">This archive is locked. Its password:</label>
+        <input id="archive-password" type="password" spellcheck="false">
+        <button type="submit" class="button ghost">Check with this password</button>
+      </form>
+      <p class="hint" id="password-hint" hidden>The password is only used for this check and isn't saved.</p>
+      <p id="card-message" class="message" role="status"></p>
       <details id="details">
         <summary>Details</summary>
         <dl class="facts">
           <dt>SHA-256</dt><dd class="mono" id="d-sha"></dd>
           <dt>Size</dt><dd id="d-size"></dd>
+          <dt>Location</dt><dd id="d-where"></dd>
         </dl>
         <div id="d-checks"></div>
         <button type="button" id="again" class="button" hidden>Check again online</button>
         <p class="hint" id="again-hint" hidden>Online answers are remembered so a second scan costs no quota.
-          This asks VirusTotal and MalwareBazaar again.</p>
+          This asks the online lookups again.</p>
       </details>
     </article>
   </section>
@@ -75,17 +140,23 @@
   <section class="how">
     <h2>How Blotter checks a file</h2>
     <ol>
-      <li>It reads the file's bytes and works out its fingerprint (SHA-256). It never opens or runs the file.</li>
-      <li>It asks VirusTotal and MalwareBazaar whether they know that fingerprint.
-        Only the fingerprint is sent. The file itself is never uploaded.</li>
-      <li>Microsoft Defender scans the file here on this PC. If Defender finds a threat it quarantines Blotter's copy,
-        and Blotter shows that as a detection.</li>
+      <li><b>What it really is.</b> Blotter reads the first bytes to find the real file type and spots names that lie
+        (such as invoice.pdf.exe). Zip, rar and 7z archives are unpacked and every file inside is checked.</li>
+      <li><b>What it can do.</b> YARA rules, capa (for programs), the program's signature and packing, Office macros,
+        PDF actions and JavaScript, and script tricks. Nothing is ever opened or run.</li>
+      <li><b>Who knows it.</b> ClamAV and Microsoft Defender scan it here. CIRCL hashlookup, and with keys VirusTotal
+        and MalwareBazaar, are asked about its fingerprint. The file itself is never uploaded.</li>
     </ol>
     <dl class="legend">
-      <dt>Malicious</dt><dd>At least one check recognises the file as malware.</dd>
-      <dt>Suspicious</dt><dd>A warning sign, such as one or two antivirus engines out of many.</dd>
+      <dt>Malicious</dt><dd>A check recognises the file as malware.</dd>
+      <dt>Suspicious</dt><dd>Warning signs: risky abilities plus hiding, a lying name, packing without a signature,
+        or no one has seen the file before; or a few antivirus engines flag it.</dd>
+      <dt>Unusual</dt><dd>It can do risky things (admin tools, some installers, mods and cheats can), but nothing
+        hides or recognises it.</dd>
       <dt>No known detections</dt><dd>Nothing recognised it. That is not a promise the file is harmless.</dd>
-      <dt>Couldn't check</dt><dd>No check could run (no internet, no keys, Defender off).</dd>
+      <dt>Couldn't fully check</dt><dd>Part of the file was too big, nested too deep, took too long, or is locked
+        with a password. Blotter never says "No known detections" then.</dd>
+      <dt>Couldn't check</dt><dd>None of the checks could run.</dd>
     </dl>
     <h2>Try it</h2>
     <p>EICAR is a standard test file that every antivirus is built to detect. It contains no real malware.

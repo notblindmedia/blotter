@@ -5,3 +5,4 @@ __pycache__/
 # never commit keys or scanned files
 .env
 *.blotter
+*.blotted

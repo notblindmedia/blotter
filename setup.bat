@@ -54,10 +54,27 @@ if exist ".venv\Scripts\python.exe" (
 rem --- 3. Install the exact pinned packages -------------------------------
 rem --require-hashes: refuse any package whose checksum differs from requirements.txt
 rem --only-binary: install ready-made packages only, never run build scripts
-echo  Installing packages (this takes a minute the first time) ...
+rem --no-deps: requirements.txt is the complete list, nothing else gets pulled in
+echo  Installing packages (this takes a few minutes the first time) ...
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check --no-input ^
-    --require-hashes --only-binary=:all: -r requirements.txt
+    --require-hashes --only-binary=:all: --no-deps -r requirements.txt
 if errorlevel 1 goto failed
+
+rem --- 4. Rules: YARA Forge and capa (a few MB, checked by checksum) -----
+echo.
+echo  Downloading the rules Blotter uses (YARA Forge, capa) ...
+".venv\Scripts\python.exe" -m blotter.updates
+
+rem --- 5. ClamAV (optional) ----------------------------------------------
+echo.
+echo  ClamAV is a second antivirus engine that runs only while Blotter is open.
+echo  It downloads about 225 MB once, plus about 110 MB of signatures, and uses
+echo  about 1.5 GB of memory while Blotter runs. You can turn it off in Settings.
+choice /c YN /m " Set up ClamAV now"
+if errorlevel 2 goto done
+".venv\Scripts\python.exe" -m blotter.updates --clamav
+
+:done
 
 echo.
 echo  Setup finished. Double-click "Start Blotter.bat" to use Blotter.
