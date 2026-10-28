@@ -182,9 +182,16 @@ USING IT
    - "Open on VirusTotal" opens the file's VirusTotal page in your browser.
      Only the fingerprint is in the address; nothing is uploaded.
    - "Trust this file" puts it on your own trusted list (by fingerprint).
-     A trusted file is never shown as more than "No known detections",
-     unless a check recognises it as malware. If the file changes by even
-     one byte, the trust ends. Undo it under Settings.
+     Trust only quiets warnings about what a file can do. It never lowers
+     a detection by an engine (Defender, ClamAV, YARA, MalwareBazaar,
+     VirusTotal) or a check that couldn't finish. A Malicious result can't
+     be trusted at all; if a file you trusted earlier is detected later, the
+     card says Malicious and "you trusted this file before, but it is now
+     detected" (your trust stays saved until you remove it). If the file
+     changes by even one byte, the trust ends. Undo it under Settings.
+   - When several engines name the same threat, the card shows one line,
+     e.g. "Recognised as EICAR test file by Defender, ClamAV, YARA and
+     Blotter." Each engine's own line is under Details.
    - "Quarantine" (only for files chosen on this PC) moves the file into
      %LOCALAPPDATA%\Blotter\quarantine with a .blotted ending, so it can't be
      opened by a double-click. "Put back" under Settings restores it.

@@ -92,6 +92,10 @@ class RetryTests(unittest.TestCase):
         path = copy(samples.zip_of({"a.txt": "x"}))
         job = wait_done(self.runner.start(path, "a.zip", 1, "0" * 64), seconds=60)
         self.assertFalse(job.to_dict()["needs_password"])
+        for _ in range(50):  # the delete may wait for an antivirus to let go of the new file
+            if not path.exists():
+                break
+            time.sleep(0.2)
         self.assertFalse(path.exists())
 
 

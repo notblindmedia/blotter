@@ -13,7 +13,7 @@ import re
 import yara
 
 from .. import config, vault
-from ..findings import MALICIOUS, SUSPICIOUS, Finding, hiding, risky, unchecked
+from ..findings import MALICIOUS, SUSPICIOUS, Finding, detected, hiding, risky, unchecked
 
 MATCH_TIMEOUT = 60
 FORGE_MEMBER = "yara-forge-core.yar"
@@ -95,13 +95,15 @@ def classify(check, match, scope=None) -> Finding:
             return risky(check, f"yara:{match.rule}", text, info)
         if level == "hiding":
             return hiding(check, f"yara:{match.rule}", text, info)
-        return Finding(check, MALICIOUS if level == "malicious" else SUSPICIOUS, text, info)
+        return detected(Finding(check, MALICIOUS if level == "malicious" else SUSPICIOUS, text, info),
+                        "Blotter", describe(match))
 
     tokens = set(match.rule.upper().split("_"))
     what = describe(match)
     if "EICAR" in tokens:
-        return Finding(check, MALICIOUS, "YARA recognises the EICAR antivirus test file. It is harmless, "
-                                         "but every scanner is built to treat it as malware.", info)
+        return detected(Finding(check, MALICIOUS, "YARA recognises the EICAR antivirus test file. It is harmless, "
+                                                  "but every scanner is built to treat it as malware.", info),
+                        "YARA", "EICAR test file")
     if tokens & PACKERISH:
         return hiding(check, "packed", f"A YARA rule says it is packed or scrambled ({what}). Some programs "
                                        "protect themselves like that, but malware does it to hide.", info)
@@ -115,9 +117,10 @@ def classify(check, match, scope=None) -> Finding:
                      "sometimes match these too.", info)
     score = int(meta.get("score") or 0)
     if tokens & GENERIC or match.rule.upper().endswith("_AUTO") or score < 70:
-        return Finding(check, SUSPICIOUS, f"A YARA rule for malware matches it ({what}). This kind of rule is "
-                                          "broad, so it is a warning sign rather than proof.", info)
-    return Finding(check, MALICIOUS, f"A YARA rule recognises it as malware: {what}.", info)
+        return detected(Finding(check, SUSPICIOUS, f"A YARA rule for malware matches it ({what}). This kind of rule "
+                                                   "is broad, so it is a warning sign rather than proof.", info),
+                        "YARA", what)
+    return detected(Finding(check, MALICIOUS, f"A YARA rule recognises it as malware: {what}.", info), "YARA", what)
 
 
 def scan_target(rules, check, path=None, data=None, scope=None) -> list[Finding]:

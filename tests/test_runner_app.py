@@ -12,7 +12,7 @@ from unittest import mock
 
 from blotter import config
 from blotter.cache import Cache
-from blotter.findings import CLEAR, ERROR, MALICIOUS, Finding, risky
+from blotter.findings import CLEAR, ERROR, MALICIOUS, Finding, detected, risky
 from blotter.runner import Runner
 
 
@@ -113,7 +113,17 @@ class AppTests(unittest.TestCase):
 
         cls.local = fake_check("local", needs_file=True)
         cls.risky = fake_check("risky", ret=[risky("risky", "inject", "It can inject code.")])
-        app = create_app(checks=[cls.local, cls.risky], cache=Cache(Path(tempfile.mkdtemp()) / "c.sqlite3"),
+
+        def engine_scan(path):  # a stand-in antivirus: "detects" one test content
+            if Path(path).read_bytes().startswith(b"BLOTTER-DETECT-ME"):
+                return [detected(Finding("engine", MALICIOUS, "The engine recognises it as Test.Thing."),
+                                 "ClamAV", "Test.Thing")]
+            return [Finding("engine", CLEAR, "The engine found nothing.")]
+
+        cls.engine = types.SimpleNamespace(ID="engine", NAME="Engine", ORDER=1, TIMEOUT=5, CACHE=False,
+                                           NEEDS_FILE=False, scan=engine_scan)
+        app = create_app(checks=[cls.local, cls.risky, cls.engine],
+                         cache=Cache(Path(tempfile.mkdtemp()) / "c.sqlite3"),
                          trust=TrustList(Path(tempfile.mkdtemp()) / "t.sqlite3"), token=TOKEN)
         cls.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=config.PORT, log_level="error"))
         threading.Thread(target=cls.server.run, daemon=True).start()
@@ -323,6 +333,16 @@ class AppTests(unittest.TestCase):
         good = {**self.host(), "X-Blotter-Token": TOKEN}
         for site in ("cross-site", "same-site"):
             self.assertEqual(self.raw("/api/status", headers={**good, "Sec-Fetch-Site": site})[0], 403, site)
+
+    def test_malicious_files_cant_be_trusted(self):
+        _, job = self.request("/api/scan", b"BLOTTER-DETECT-ME", "POST", {"X-File-Name": "bad.exe"})
+        job = self.finished(job)
+        self.assertEqual(job["verdict"]["verdict"], "malicious")
+        status, body = self.post(f"/api/jobs/{job['id']}/trust", {"trusted": True})
+        self.assertEqual(status, 409)
+        self.assertIn("doesn't let you trust", body["error"])
+        status, body = self.request("/api/status")
+        self.assertNotIn(job["sha256"], [t["sha256"] for t in body["trusted"]])
 
     def test_password_endpoint(self):
         good = {**self.host(), "X-Blotter-Token": TOKEN, "Content-Type": "application/json"}

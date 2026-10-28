@@ -256,6 +256,9 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
         if not found or found.state != "done":
             return JSONResponse({"error": "Unknown or unfinished scan."}, status_code=404)
         body = await request.json()
+        if body.get("trusted") and (found.verdict or {}).get("verdict") == "malicious":
+            return JSONResponse({"error": "Blotter doesn't let you trust a file that a check recognises as malware."},
+                                status_code=409)
         if body.get("trusted"):
             trust.add(found.sha256, found.name)
         else:

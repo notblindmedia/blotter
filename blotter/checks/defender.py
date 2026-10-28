@@ -8,7 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..findings import CLEAR, ERROR, MALICIOUS, UNCHECKED, Finding
+from ..findings import CLEAR, ERROR, MALICIOUS, UNCHECKED, Finding, detected
 
 ID = "defender"
 NAME = "Microsoft Defender"
@@ -63,6 +63,11 @@ def _decode(raw: bytes) -> str:
 
 
 def scan(path) -> list[Finding]:
+    return [detected(f, "Defender", (f.details.get("threats") or [None])[0]) if f.level == MALICIOUS else f
+            for f in _scan(path)]
+
+
+def _scan(path) -> list[Finding]:
     path = Path(path)
     if not path.exists():
         return [Finding(ID, MALICIOUS,
@@ -88,6 +93,11 @@ def scan(path) -> list[Finding]:
 
 
 def interpret(code: int, output: str, still_there: bool, scanner: str = "") -> list[Finding]:
+    return [detected(f, "Defender", (f.details.get("threats") or [None])[0]) if f.level == MALICIOUS else f
+            for f in _interpret(code, output, still_there, scanner)]
+
+
+def _interpret(code: int, output: str, still_there: bool, scanner: str = "") -> list[Finding]:
     threats = list(dict.fromkeys(re.findall(r"^\s*Threat\s*:\s*(.+?)\s*$", output, re.M)))
     found = re.search(r"Found\s+(\d+)\s+threats?", output, re.I)
     details = {"scanner": scanner, "exit_code": code, "threats": threats,

@@ -3,7 +3,7 @@
 import time
 
 from .. import clamav, settings
-from ..findings import CLEAR, ERROR, MALICIOUS, SKIPPED, SUSPICIOUS, Finding, unchecked
+from ..findings import CLEAR, ERROR, MALICIOUS, SKIPPED, SUSPICIOUS, Finding, detected, unchecked
 
 ID = "clamav"
 NAME = "ClamAV"
@@ -49,13 +49,13 @@ def interpret(answer: str, version: str = "") -> list[Finding]:
         name = answer.split(": ", 1)[-1][:-len(" FOUND")].strip()
         details["signature"] = name
         if "eicar" in name.lower():
-            return [Finding(ID, MALICIOUS, f"ClamAV recognises the EICAR antivirus test file ({name}). It is "
-                                           "harmless, but every scanner treats it as malware.", details)]
+            return [detected(Finding(ID, MALICIOUS, f"ClamAV recognises the EICAR antivirus test file ({name}). It is "
+                                           "harmless, but every scanner treats it as malware.", details), "ClamAV", name)]
         if name.startswith("Heuristics.Limits.Exceeded"):
             return [unchecked(ID, f"The file is over one of ClamAV's size limits ({name}), so ClamAV didn't scan "
                                   "all of it.", details)]
         if name.startswith(("Heuristics.", "PUA.")):
-            return [Finding(ID, SUSPICIOUS, f"ClamAV's broader rules flag it ({name}). That is a warning sign "
-                                            "rather than a known-malware match.", details)]
-        return [Finding(ID, MALICIOUS, f"ClamAV recognises it as malware: {name}.", details)]
+            return [detected(Finding(ID, SUSPICIOUS, f"ClamAV's broader rules flag it ({name}). That is a warning "
+                                                     "sign rather than a known-malware match.", details), "ClamAV", name)]
+        return [detected(Finding(ID, MALICIOUS, f"ClamAV recognises it as malware: {name}.", details), "ClamAV", name)]
     return [Finding(ID, ERROR, f"ClamAV couldn't scan it ({answer[:160] or 'no answer'}).", details)]

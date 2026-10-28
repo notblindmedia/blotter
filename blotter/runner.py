@@ -164,10 +164,14 @@ class Runner:
 
 
 def _delete(path) -> None:
-    try:
-        path.unlink(missing_ok=True)  # Blotter's own temporary copy
-    except OSError:
-        pass
+    """Remove Blotter's own temporary copy. Windows refuses while another program (an antivirus scanning the
+    new file, for example) still has it open, so try a few times; start-up cleans up anything left."""
+    for attempt in range(10):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except OSError:
+            time.sleep(0.2 * (attempt + 1))
 
 
 def _too_slow(check) -> Finding:

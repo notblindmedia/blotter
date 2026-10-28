@@ -54,6 +54,13 @@ class Finding:
                    list(data.get("signals") or []))
 
 
+def detected(finding: Finding, engine: str, threat=None) -> Finding:
+    """Mark a finding as an engine's detection (Defender, ClamAV, YARA ...) and the threat it names.
+    Detections are never quieted by "Trust this file", and the card groups those naming the same threat."""
+    finding.details.update(engine=engine, threat=threat or None)
+    return finding
+
+
 def risky(check, ability, text, details=None, hiding=False, level=NOTE) -> Finding:
     """A risky ability. `ability` is a short key so two checks finding the same thing count once."""
     signals = [RISKY, HIDING] if hiding else [RISKY]

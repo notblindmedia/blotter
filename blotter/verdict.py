@@ -20,6 +20,7 @@ abilities by one step. A file you trust can't be more than "No known detections"
 recognises it as malware or couldn't finish.
 """
 
+import re
 from collections import defaultdict
 
 from .findings import (CLEAR, DISGUISED, ERROR, HIDING, KNOWN_GOOD, LYING_NAME, MALICIOUS, NOTE, PACKED,
@@ -133,15 +134,19 @@ def decide(findings, trusted=False) -> dict:
     if key == heuristic and why:
         sentence = ("It can do risky things, and " if RISKY in everything else "") + ", and ".join(why)
         notes.append(sentence[0].upper() + sentence[1:] + ".")
-    # Trust quiets warnings about abilities, never a detection and never a check that didn't finish.
-    if trusted and key in ("suspicious", "unusual") and levels & {NOTE, CLEAR, UNKNOWN}:
+    # Trust (and CIRCL's known-good) quiet warnings about abilities, never an engine's detection
+    # (Defender, ClamAV, YARA, MalwareBazaar, VirusTotal, capa families) and never an unfinished check.
+    flagged = any(f.level == MALICIOUS or (f.details.get("engine") and f.level == SUSPICIOUS) for f in findings)
+    if trusted and flagged:
+        word = "detected" if key == "malicious" else "flagged"
+        notes.append(f"You trusted this file before, but it is now {word}. Your trust stays saved; "
+                     "remove it under Settings if you no longer trust the file.")
+    elif trusted and key in ("suspicious", "unusual") and levels & {NOTE, CLEAR, UNKNOWN}:
         notes.append(f"You marked this file as trusted, so Blotter doesn't raise a warning for it "
                      f"(it would have said {title}).")
         key = "no_known_detections"
         title, summary = VERDICTS[key]
-    elif trusted and key == "malicious":
-        notes.append("You marked this file as trusted, but a check recognises it as malware.")
-    elif KNOWN_GOOD in everything and key == heuristic and key in ("suspicious", "unusual"):
+    elif KNOWN_GOOD in everything and not flagged and key == heuristic and key in ("suspicious", "unusual"):
         lower = STEPS[STEPS.index(key) - 1]
         notes.append(f"CIRCL hashlookup lists it as known software, so Blotter lowered {title} to "
                      f"{VERDICTS[lower][0]}.")
@@ -151,11 +156,74 @@ def decide(findings, trusted=False) -> dict:
     return {"verdict": key, "title": title, "summary": " ".join([summary, *notes]), "reasons": _reasons(findings, counted)}
 
 
+# Engines in the order the card names them, and words that say nothing about which threat it is.
+ENGINE_ORDER = ["Defender", "ClamAV", "MalwareBazaar", "VirusTotal", "YARA", "Blotter", "capa"]
+_GENERIC = set("""virus trojan worm backdoor dropper downloader ransom ransomware spyware adware riskware pua
+    win32 win64 windows dos msil linux script test file files signature signatures sample known family malw
+    malware generic heur heuristic heuristics agent variant rule rules detect detects detection pattern standard
+    antivirus string strings trellix elastic ditekshen signature_base malpedia auto suspicious hacktool tool
+    the this that with from""".split())
+
+
+def _threat_words(f) -> set:
+    raw = " ".join(str(x) for x in (f.details.get("threat"), f.details.get("rule")) if x)
+    return {w for w in re.findall(r"[a-z0-9]+", raw.lower()) if len(w) >= 4 and w not in _GENERIC and not w.isdigit()}
+
+
+def _threat_name(group, words) -> str:
+    if "eicar" in words:
+        return "EICAR test file"
+    counts = {}
+    for f in group:
+        for w in _threat_words(f):
+            counts[w] = counts.get(w, 0) + 1
+    word = max(sorted(counts), key=lambda w: counts[w])
+    for f in group:  # keep the spelling an engine used, e.g. AgentTesla
+        m = re.search(re.escape(word), str(f.details.get("threat") or ""), re.I)
+        if m:
+            return m.group(0)
+    return word.title()
+
+
+def _grouped_detections(findings):
+    """{id(finding): line or None}: detections at the same level naming the same threat share one line
+    ('Recognised as EICAR test file by Defender, ClamAV, YARA and Blotter.'); the rest are left alone."""
+    detections = [f for f in findings if f.details.get("engine") and f.level in (MALICIOUS, SUSPICIOUS)]
+    groups = []  # [level, words, members]
+    for f in detections:
+        words = _threat_words(f)
+        home = next((g for g in groups if g[0] == f.level and g[1] & words), None) if words else None
+        if home:
+            home[1] |= words
+            home[2].append(f)
+        else:
+            groups.append([f.level, set(words), [f]])
+    out = {}
+    for level, words, members in groups:
+        if len(members) < 2:
+            continue
+        engines = sorted({m.details["engine"] for m in members},
+                         key=lambda e: ENGINE_ORDER.index(e) if e in ENGINE_ORDER else 99)
+        names = engines[0] if len(engines) == 1 else ", ".join(engines[:-1]) + " and " + engines[-1]
+        verb = "Recognised as" if level == MALICIOUS else "Flagged as possibly"
+        line = f"{verb} {_threat_name(members, words)} by {names}."
+        out[id(members[0])] = line
+        for m in members[1:]:
+            out[id(m)] = None
+    return out
+
+
 def _reasons(findings, counted=()) -> list[str]:
-    """Reasons, most serious first. Weak signs only appear where they counted (the rest stay in Details)."""
+    """Reasons, most serious first. Weak signs only appear where they counted (the rest stay in Details).
+    Detections naming the same threat are one line here; each check's own line stays under Details."""
     seen, out = set(), []
+    grouped = _grouped_detections(findings)
     for f in sorted(findings, key=lambda f: _ORDER[f.level]):
         if f.level == SKIPPED:
+            continue
+        if id(f) in grouped:
+            if grouped[id(f)]:
+                out.append(grouped[id(f)])
             continue
         if f.signals == [WEAK] and f.details.get("scope", "") not in counted:
             continue

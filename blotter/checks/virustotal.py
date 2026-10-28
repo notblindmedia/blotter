@@ -10,7 +10,7 @@ import aiohttp
 import vt
 
 from .. import hashing, keys
-from ..findings import CLEAR, ERROR, MALICIOUS, SKIPPED, SUSPICIOUS, UNKNOWN, UNKNOWN_ONLINE, Finding
+from ..findings import CLEAR, ERROR, MALICIOUS, SKIPPED, SUSPICIOUS, UNKNOWN, UNKNOWN_ONLINE, Finding, detected
 
 ID = "virustotal"
 NAME = "VirusTotal"
@@ -134,15 +134,15 @@ def interpret(sha: str, data: dict) -> list[Finding]:
     if mal >= MALICIOUS_AT:
         name = f" (most common name: {label})" if label else ""
         text = f"VirusTotal: {mal} of {_engines(total)} {flags} this file as malicious{name}."
-        return [Finding(ID, MALICIOUS, text, details)]
+        return [detected(Finding(ID, MALICIOUS, text, details), "VirusTotal", label)]
     if mal:
         text = (f"VirusTotal: {mal} of {_engines(total)} {flags} this file as malicious. "
                 "One or two hits are often false alarms, but it is a warning sign.")
-        return [Finding(ID, SUSPICIOUS, text, details)]
+        return [detected(Finding(ID, SUSPICIOUS, text, details), "VirusTotal", label)]
     if sus:
         verb = "calls" if sus == 1 else "call"
         text = f"VirusTotal: {sus} of {_engines(total)} {verb} this file suspicious, and none call it malicious."
-        return [Finding(ID, SUSPICIOUS, text, details)]
+        return [detected(Finding(ID, SUSPICIOUS, text, details), "VirusTotal", label)]
     when = f" (last scanned there {date})" if date else ""
     text = f"VirusTotal: none of the {_engines(total)} that scanned this file flag it{when}."
     return [Finding(ID, CLEAR, text, details)]

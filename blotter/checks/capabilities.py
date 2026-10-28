@@ -12,7 +12,8 @@ import re
 
 from .. import config, procs, worker
 from ..analyze import filetype
-from ..findings import CLEAR, ERROR, SKIPPED, SUSPICIOUS, WEAK, Finding, hiding, risky, unchecked, weak
+from ..findings import (CLEAR, ERROR, SKIPPED, SUSPICIOUS, WEAK, Finding, detected, hiding, risky, unchecked,
+                        weak)
 
 ID = "capa"
 NAME = "Abilities (capa)"
@@ -150,8 +151,8 @@ def interpret(result: dict) -> list[Finding]:
             continue
         if ability == "family":
             family = namespace.split("/")[1] if "/" in namespace else name
-            found.append(Finding(ID, SUSPICIOUS, f"capa recognises code from the {family} malware family "
-                                                 f"(\"{name}\").", details))
+            found.append(detected(Finding(ID, SUSPICIOUS, f"capa recognises code from the {family} malware family "
+                                                          f"(\"{name}\").", details), "capa", family))
             continue
         if ability in seen:
             continue

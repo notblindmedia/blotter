@@ -237,7 +237,9 @@ function render(job) {
   $("card-actions").hidden = false;
   $("open-vt").href = `https://www.virustotal.com/gui/file/${job.sha256}`;
   $("vt-state").textContent = vtState(job.checks.find((c) => c.id === "virustotal"));
-  $("trust").hidden = !done;
+  // A Malicious result can't be trusted; a file trusted earlier can still be un-trusted.
+  const malicious = done && job.verdict.verdict === "malicious";
+  $("trust").hidden = !done || (malicious && !job.trusted);
   $("trust").textContent = job.trusted ? "Stop trusting this file" : "Trust this file";
   $("quarantine").hidden = !(done && job.source_path);
   $("password-form").hidden = !(done && job.needs_password);
