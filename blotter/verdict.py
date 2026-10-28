@@ -208,15 +208,23 @@ def _grouped_detections(findings):
     """{id(finding): line or None}: detections at the same level naming the same threat share one line
     ('Recognised as EICAR test file by Defender, ClamAV, YARA and Blotter.'); the rest are left alone."""
     detections = [f for f in findings if f.details.get("engine") and f.level in (MALICIOUS, SUSPICIOUS)]
-    groups = []  # [level, words, members]
+    groups, unnamed = [], []  # groups: [level, words, members]
     for f in detections:
         words = _threat_words(f)
-        home = next((g for g in groups if g[0] == f.level and g[1] & words), None) if words else None
+        if not words:
+            unnamed.append(f)  # e.g. Defender removed the copy without saying what it found
+            continue
+        home = next((g for g in groups if g[0] == f.level and g[1] & words), None)
         if home:
             home[1] |= words
             home[2].append(f)
         else:
             groups.append([f.level, set(words), [f]])
+    for f in unnamed:
+        # Without a name it can only join when there is exactly one threat at its level on the card.
+        same_level = [g for g in groups if g[0] == f.level]
+        if len(same_level) == 1:
+            same_level[0][2].append(f)
     out = {}
     for level, words, members in groups:
         if len(members) < 2:

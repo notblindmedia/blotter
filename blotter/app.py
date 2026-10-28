@@ -12,7 +12,6 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
 
 from . import __version__, clamav, config, keys, network, procs, quarantine, sandbox, settings, updates
 from .cache import Cache
@@ -22,6 +21,18 @@ from .runner import Runner
 from .trust import TrustList
 
 STATIC = Path(__file__).parent / "static"
+CODE = Path(__file__).parent
+TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+         ".html": "text/html; charset=utf-8"}
+
+
+def code_fingerprint() -> str:
+    """One hash over Blotter's own code and page files, to notice an update while Blotter runs."""
+    digest = hashlib.sha256()
+    for path in sorted(CODE.rglob("*")):
+        if path.is_file() and path.suffix in (".py", ".js", ".css", ".html") and "__pycache__" not in path.parts:
+            digest.update(str(path.relative_to(CODE)).encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()
 VIRUS_BLOCKED = (225, 226)  # Windows: "contains a virus" / "virus deleted" while saving
 CHUNK = 1024 * 1024
 
@@ -49,6 +60,16 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
     hosts = {f"127.0.0.1:{config.PORT}", f"localhost:{config.PORT}"}
     origins = {f"http://{h}" for h in hosts}
     update_state = {"running": False, "lines": [], "at": None}
+    # The page and the code as they were when this Blotter started. If the files on disk change (an update),
+    # the page keeps matching the running code and /api/status says a restart is needed.
+    page_files = {p.name: p.read_bytes() for p in STATIC.iterdir() if p.is_file()}
+    started_with = code_fingerprint()
+    stale = {"checked": 0.0, "value": False}
+
+    def code_changed() -> bool:
+        if time.monotonic() - stale["checked"] > 5:
+            stale.update(checked=time.monotonic(), value=code_fingerprint() != started_with)
+        return stale["value"]
 
     def refuse(why: str):
         return JSONResponse({"app": "blotter", "error": f"Request refused: {why}."}, status_code=403)
@@ -91,7 +112,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
 
     @app.get("/")
     def index():
-        page = (STATIC / "index.html").read_text(encoding="utf-8")
+        page = page_files["index.html"].decode("utf-8")
         meta = f'<meta name="blotter-token" content="{token}">'
         return HTMLResponse(page.replace("<head>", "<head>\n" + meta, 1))
 
@@ -105,6 +126,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
         forge = config.YARA_FORGE
         return {
             "keys": keys.status(),
+            "restart_needed": code_changed(),
             "key_store_ok": keys.backend_ok(),
             "settings": settings.load(),
             "defender": str(scanner) if scanner else None,
@@ -316,7 +338,13 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
     def favicon():
         return Response(status_code=204)
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    @app.get("/static/{name}")
+    def static(name: str):
+        # Served from the copy read at start, so the page always matches the code that is running.
+        if name not in page_files:
+            return JSONResponse({"error": "Not found."}, status_code=404)
+        return Response(page_files[name], media_type=TYPES.get(Path(name).suffix, "application/octet-stream"))
+
     return app
 
 

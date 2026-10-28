@@ -55,6 +55,7 @@ const CLAMAV_WORDS = {
 
 function showStatus(s) {
   status = s;
+  $("restart").hidden = !s.restart_needed;
   showKeyState(s.keys);
   $("clamav-on").checked = s.settings.clamav;
   const c = s.clamav;
@@ -189,6 +190,7 @@ function poll(id) {
       const job = await api(`/api/jobs/${id}`);
       render(job);
       if (job.state !== "done") poll(id);
+      else refresh();  // also notices an update made while Blotter runs
     } catch (error) {
       showProblem("", error.message);
     }

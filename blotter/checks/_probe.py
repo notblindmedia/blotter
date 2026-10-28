@@ -42,4 +42,22 @@ def scan(path):
             return [Finding("probe", CLEAR, "write: allowed")]
         except OSError as e:
             return [Finding("probe", CLEAR, f"write: blocked ({type(e).__name__})")]
+    elif action in (b"eicar-engines", b"eicar-engines-unnamed"):
+        return _eicar_engines(named=action == b"eicar-engines")
     return [Finding("probe", CLEAR, "The probe ran fine.")]
+
+
+def _eicar_engines(named: bool):
+    """What Defender, ClamAV and YARA report for EICAR, made by their real code inside this worker.
+    EICAR stays in memory (on disk, Defender would remove it)."""
+    from ..analyze import yararules
+    from . import clamav, defender
+    eicar = "".join(["X5O!P%@AP[4\\PZX54(P^)7CC)7}$", "EICAR-STANDARD-", "ANTIVIRUS-TEST-FILE!$H+H*"]).encode()
+    if named:
+        found = defender.interpret(2, "Found 1 threats.\r\nThreat                  : Virus:DOS/EICAR_Test_File\r\n",
+                                   still_there=False)
+    else:
+        found = defender.interpret(2147942402, "CmdTool: Failed with hr = 0x80070002", still_there=False)
+    found += clamav.interpret("stream: Eicar-Test-Signature FOUND", "ClamAV 1.5.4/28167/Wed Oct 28 07:24:17 2026")
+    found += yararules.scan_target(yararules.load(), "yara", data=eicar)
+    return found

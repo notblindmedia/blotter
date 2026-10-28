@@ -202,6 +202,11 @@ USING IT
 
 5. To stop Blotter, close the black window. ClamAV stops with it.
 
+6. After an update (new Blotter files), close the black window and start
+   Blotter again. Double-clicking "Start Blotter.bat" while Blotter runs
+   only reopens the page of the running, older Blotter. The page notices
+   this and says "Blotter was updated while it was running".
+
 Quota: a free VirusTotal key allows 4 lookups a minute and 500 a day.
 Blotter waits for a free slot rather than going over. Online answers are
 remembered, so checking the same file again costs nothing. "Check again
