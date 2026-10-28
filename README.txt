@@ -182,9 +182,12 @@ USING IT
    - "Open on VirusTotal" opens the file's VirusTotal page in your browser.
      Only the fingerprint is in the address; nothing is uploaded.
    - "Trust this file" puts it on your own trusted list (by fingerprint).
-     Trust only quiets warnings about what a file can do. It never lowers
-     a detection by an engine (Defender, ClamAV, YARA, MalwareBazaar,
-     VirusTotal) or a check that couldn't finish. A Malicious result can't
+     Trust quiets warnings about what a file can do, and a result where
+     only 1 or 2 VirusTotal engines flag the file (often false alarms; the
+     card then says "You trusted this file; 1 VirusTotal engine flags it").
+     It never lowers a detection by Defender, ClamAV, MalwareBazaar, YARA,
+     capa's malware families or 3 or more VirusTotal engines, and never a
+     check that couldn't finish. A Malicious result can't
      be trusted at all; if a file you trusted earlier is detected later, the
      card says Malicious and "you trusted this file before, but it is now
      detected" (your trust stays saved until you remove it). If the file

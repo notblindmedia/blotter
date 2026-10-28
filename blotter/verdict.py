@@ -78,6 +78,14 @@ def _weak(signals, unknown_everywhere):
     return level, ["signs that are common on their own add up: " + ", ".join(words)]
 
 
+def _vt_words(f) -> str:
+    """'1 VirusTotal engine flags it' / '2 VirusTotal engines flag it' / '... call it suspicious'."""
+    mal, sus = int(f.details.get("malicious") or 0), int(f.details.get("suspicious") or 0)
+    if mal:
+        return "1 VirusTotal engine flags it" if mal == 1 else f"{mal} VirusTotal engines flag it"
+    return "1 VirusTotal engine calls it suspicious" if sus == 1 else f"{sus} VirusTotal engines call it suspicious"
+
+
 def _abilities(findings):
     """Per scope (the file itself, or one file inside an archive): its signals."""
     scopes = defaultdict(set)
@@ -134,19 +142,27 @@ def decide(findings, trusted=False) -> dict:
     if key == heuristic and why:
         sentence = ("It can do risky things, and " if RISKY in everything else "") + ", and ".join(why)
         notes.append(sentence[0].upper() + sentence[1:] + ".")
-    # Trust (and CIRCL's known-good) quiet warnings about abilities, never an engine's detection
-    # (Defender, ClamAV, YARA, MalwareBazaar, VirusTotal, capa families) and never an unfinished check.
-    flagged = any(f.level == MALICIOUS or (f.details.get("engine") and f.level == SUSPICIOUS) for f in findings)
+    # Trust (and CIRCL's known-good) quiet warnings about abilities, and a weak VirusTotal result (1-2 engines,
+    # often false alarms). Never: Malicious (3+ VirusTotal engines, Defender, ClamAV, MalwareBazaar, YARA),
+    # ClamAV's or YARA's broader warnings, capa malware families, or an unfinished check.
+    weak_vt = [f for f in findings if f.check == "virustotal" and f.level == SUSPICIOUS]
+    weak_ids = {id(f) for f in weak_vt}
+    flagged = any(f.level == MALICIOUS or (f.details.get("engine") and f.level == SUSPICIOUS and id(f) not in weak_ids)
+                  for f in findings)
+    quiet_to = "couldnt_fully_check" if UNCHECKED in everything else "no_known_detections"
     if trusted and flagged:
         word = "detected" if key == "malicious" else "flagged"
         notes.append(f"You trusted this file before, but it is now {word}. Your trust stays saved; "
                      "remove it under Settings if you no longer trust the file.")
     elif trusted and key in ("suspicious", "unusual") and levels & {NOTE, CLEAR, UNKNOWN}:
-        notes.append(f"You marked this file as trusted, so Blotter doesn't raise a warning for it "
-                     f"(it would have said {title}).")
-        key = "no_known_detections"
+        if weak_vt:
+            notes.append(f"You trusted this file; {_vt_words(weak_vt[0])}.")
+        else:
+            notes.append(f"You marked this file as trusted, so Blotter doesn't raise a warning for it "
+                         f"(it would have said {title}).")
+        key = quiet_to
         title, summary = VERDICTS[key]
-    elif KNOWN_GOOD in everything and not flagged and key == heuristic and key in ("suspicious", "unusual"):
+    elif KNOWN_GOOD in everything and not (flagged or weak_vt) and key == heuristic and key in ("suspicious", "unusual"):
         lower = STEPS[STEPS.index(key) - 1]
         notes.append(f"CIRCL hashlookup lists it as known software, so Blotter lowered {title} to "
                      f"{VERDICTS[lower][0]}.")
@@ -162,6 +178,9 @@ _GENERIC = set("""virus trojan worm backdoor dropper downloader ransom ransomwar
     win32 win64 windows dos msil linux script test file files signature signatures sample known family malw
     malware generic heur heuristic heuristics agent variant rule rules detect detects detection pattern standard
     antivirus string strings trellix elastic ditekshen signature_base malpedia auto suspicious hacktool tool
+    trojandownloader trojandropper trojanspy trojanclicker trojanproxy trojanpws pwsstealer virtool exploit
+    behavior packed obfuscated obfuscator stealer infostealer loader keylogger miner coinminer potentially
+    unwanted program application other multi andr android macos script html office doc pdf
     the this that with from""".split())
 
 

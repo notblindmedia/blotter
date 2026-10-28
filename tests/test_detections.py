@@ -7,8 +7,9 @@ from pathlib import Path
 
 from blotter.analyze import yararules
 from blotter.cache import Cache
-from blotter.checks import clamav, defender, malwarebazaar, virustotal
-from blotter.findings import CLEAR, HIDING, KNOWN_GOOD, MALICIOUS, NOTE, SUSPICIOUS, Finding, detected, risky
+from blotter.checks import capabilities, clamav, defender, malwarebazaar, virustotal
+from blotter.findings import (CLEAR, HIDING, KNOWN_GOOD, MALICIOUS, NOTE, SUSPICIOUS, UNCHECKED, Finding, detected,
+                              risky)
 from blotter.runner import Runner
 from blotter.trust import TrustList
 from blotter.verdict import decide
@@ -57,7 +58,11 @@ class TrustNeverHidesDetectionsTests(unittest.TestCase):
             "ClamAV heuristics": clamav.interpret("stream: Heuristics.Phishing.Email FOUND"),
             "YARA": yararules.scan_target(yararules.load(), "yara", data=samples.eicar()),
             "MalwareBazaar": malwarebazaar.interpret("a" * 64, {"query_status": "ok", "data": [{"signature": "AgentTesla"}]}),
-            "VirusTotal, 1 engine": virustotal.interpret("a" * 64, vt_data({"malicious": 1, "undetected": 69})),
+            "VirusTotal, 3 engines": virustotal.interpret("a" * 64, vt_data({"malicious": 3, "undetected": 67})),
+            "YARA broad rule": [yararules.classify("yara", types.SimpleNamespace(
+                rule="ELASTIC_Windows_Generic_Threat_1", namespace="forge", meta={"score": 75}))],
+            "capa malware family": capabilities.interpret(
+                {"rules": {"match known PlugX module": {"meta": {"namespace": "malware-family/plugx"}}}}),
         }
         for name, found in engines.items():
             plain = decide([RAN, *found])
@@ -65,6 +70,32 @@ class TrustNeverHidesDetectionsTests(unittest.TestCase):
             self.assertIn(plain["verdict"], ("malicious", "suspicious"), name)
             self.assertEqual(trusted["verdict"], plain["verdict"], f"trust lowered a {name} detection")
             self.assertIn("You trusted this file before, but it is now", trusted["summary"], name)
+
+    def test_trust_quiets_one_or_two_virustotal_engines(self):
+        for engines, words in ((1, "1 VirusTotal engine flags it"), (2, "2 VirusTotal engines flag it")):
+            found = virustotal.interpret("a" * 64, vt_data({"malicious": engines, "undetected": 70 - engines}))
+            self.assertEqual(decide([RAN, *found])["verdict"], "suspicious")
+            v = decide([RAN, *found], trusted=True)
+            self.assertEqual(v["verdict"], "no_known_detections", engines)
+            self.assertIn(f"You trusted this file; {words}.", v["summary"])
+            self.assertTrue(any("VirusTotal" in r for r in v["reasons"]), "the engine line still shows")
+        found = virustotal.interpret("a" * 64, vt_data({"suspicious": 1, "undetected": 69}))
+        self.assertIn("1 VirusTotal engine calls it suspicious", decide([RAN, *found], trusted=True)["summary"])
+
+    def test_weak_virustotal_plus_a_real_detection_is_not_lowered(self):
+        found = [*virustotal.interpret("a" * 64, vt_data({"malicious": 1, "undetected": 69})),
+                 *clamav.interpret("stream: Heuristics.Phishing.Email FOUND")]
+        v = decide([RAN, *found], trusted=True)
+        self.assertEqual(v["verdict"], "suspicious")
+        self.assertIn("now flagged", v["summary"])
+
+    def test_trust_never_turns_an_unfinished_check_into_no_known(self):
+        found = [*virustotal.interpret("a" * 64, vt_data({"malicious": 1, "undetected": 69})),
+                 Finding("capa", NOTE, "too big", {}, [UNCHECKED])]
+        self.assertEqual(decide([RAN, *found], trusted=True)["verdict"], "couldnt_fully_check")
+        found = [risky("capa", "inject", "x"), Finding("x", NOTE, "scrambled", {}, [HIDING]),
+                 Finding("capa", NOTE, "too big", {}, [UNCHECKED])]
+        self.assertEqual(decide([RAN, *found], trusted=True)["verdict"], "couldnt_fully_check")
 
     def test_malicious_wording(self):
         v = decide([RAN, *eicar_findings()], trusted=True)
@@ -129,6 +160,26 @@ class GroupingTests(unittest.TestCase):
     def test_one_detection_keeps_its_own_words(self):
         [f] = clamav.interpret("stream: Win.Trojan.Emotet-9 FOUND")
         self.assertEqual(decide([RAN, f])["reasons"][0], f.text)
+
+    def test_generic_words_never_merge_different_threats(self):
+        found = [*defender.interpret(2, EICAR_OUTPUT.replace("Virus:DOS/EICAR_Test_File", "Trojan:Win32/Agent!ml"),
+                                     still_there=True),
+                 *clamav.interpret("stream: Win.Trojan.Agent-9 FOUND"),
+                 *clamav.interpret("stream: Win.Malware.Heur-1 FOUND"),
+                 *malwarebazaar.interpret("a" * 64, {"query_status": "ok", "data": [{"signature": "Generic Malware"}]}),
+                 *virustotal.interpret("a" * 64, vt_data({"malicious": 5, "undetected": 65}, label="trojan.generic/win32"))]
+        v = decide([RAN, *found])
+        self.assertFalse(any(r.startswith("Recognised as") for r in v["reasons"]), v["reasons"])
+
+    def test_type_words_dont_merge_but_family_names_do(self):
+        found = [*defender.interpret(2, EICAR_OUTPUT.replace("Virus:DOS/EICAR_Test_File",
+                                                             "TrojanDownloader:Win32/Emotet.A"), still_there=True),
+                 *clamav.interpret("stream: Win.Trojan.Emotet-1 FOUND"),
+                 *defender.interpret(2, EICAR_OUTPUT.replace("Virus:DOS/EICAR_Test_File",
+                                                             "TrojanDownloader:Win32/Qakbot"), still_there=True)]
+        v = decide([RAN, *found])
+        self.assertIn("Recognised as Emotet by Defender and ClamAV.", v["reasons"])
+        self.assertTrue(any("Qakbot" in r and not r.startswith("Recognised as") for r in v["reasons"]), v["reasons"])
 
     def test_warnings_group_separately_from_detections(self):
         found = [*clamav.interpret("stream: Heuristics.Phishing.Emotet FOUND"),
