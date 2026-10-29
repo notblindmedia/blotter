@@ -53,8 +53,13 @@ def _env(workdir: Path) -> dict:
             "BLOTTER_WORK": str(workdir), "BLOTTER_PATHS": json.dumps(PATHS)}
 
 
-def run(module: str, path, name, sha256, timeout: float, sandboxed=True, password=None):
-    """Run module.scan(path) in a worker. Returns a list of Findings or raises TimeoutError / RuntimeError."""
+class Cancelled(Exception):
+    """The check was stopped because Blotter is closing."""
+
+
+def run(module: str, path, name, sha256, timeout: float, sandboxed=True, password=None, priority=None, cancel=None):
+    """Run module.scan(path) in a worker. Returns a list of Findings or raises TimeoutError / RuntimeError /
+    Cancelled. `priority` (procs.BELOW_NORMAL) holds for the worker and what it starts (capa)."""
     workdir = config.INCOMING / f"work-{uuid.uuid4().hex}"
     workdir.mkdir(parents=True)
     try:
@@ -67,11 +72,13 @@ def run(module: str, path, name, sha256, timeout: float, sandboxed=True, passwor
             if sandbox.mode() == "appcontainer" and Path(path).exists():
                 sandbox.grant(path, sandbox.sid())  # the one file this check may read
             code = sandbox.run(command(request, sandboxed=True), workdir, _env(workdir), timeout,
-                               memory_limit=config.WORKER_MEMORY)
+                               memory_limit=config.WORKER_MEMORY, priority=priority, cancel=cancel)
             err = b""
         else:
             code, _, err = procs.run(command(request), timeout=timeout, memory_limit=config.WORKER_MEMORY,
-                                     env=_env(workdir))
+                                     env=_env(workdir), priority=priority, cancel=cancel)
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
         if code is None:
             raise TimeoutError(f"after {time.monotonic() - start:.0f} s")
         result = workdir / "result.json"

@@ -34,6 +34,7 @@ def code_fingerprint() -> str:
             digest.update(str(path.relative_to(CODE)).encode() + b"\0" + path.read_bytes())
     return digest.hexdigest()
 VIRUS_BLOCKED = (225, 226)  # Windows: "contains a virus" / "virus deleted" while saving
+SHOWN = ("deep_check", "done")  # job states with an answer on the card (runner.py)
 CHUNK = 1024 * 1024
 
 # A native Windows "Open" dialog, in its own process. Prints the chosen path (or nothing).
@@ -57,6 +58,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
     app.state.token = token
     trust = trust or TrustList(config.TRUST_PATH)
     runner = Runner(cache or Cache(config.DB_PATH), checks if checks is not None else load_checks(), trust=trust)
+    app.state.runner = runner  # __main__.py closes it (the deep-check queue) when Blotter closes
     hosts = {f"127.0.0.1:{config.PORT}", f"localhost:{config.PORT}"}
     origins = {f"http://{h}" for h in hosts}
     update_state = {"running": False, "lines": [], "at": None}
@@ -275,7 +277,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/trust")
     async def trust_job(job_id: str, request: Request):
         found = runner.get(job_id)
-        if not found or found.state != "done":
+        if not found or found.state not in SHOWN:
             return JSONResponse({"error": "Unknown or unfinished scan."}, status_code=404)
         body = await request.json()
         if body.get("trusted") and (found.verdict or {}).get("verdict") == "malicious":
@@ -296,7 +298,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/quarantine")
     def quarantine_job(job_id: str):
         found = runner.get(job_id)
-        if not found or found.state != "done":
+        if not found or found.state not in SHOWN:
             return JSONResponse({"error": "Unknown or unfinished scan."}, status_code=404)
         if not found.source_path:
             return JSONResponse({"error": "Blotter only has a copy of this file (it was dropped on the page), so "
@@ -362,7 +364,7 @@ def _save_failed(error: OSError, out, path):
 
 
 def clean_incoming() -> None:
-    """Remove copies (and unpacked archive folders) left behind if Blotter was closed mid-scan."""
+    """Remove copies, unpacked archive folders and worker folders left behind if Blotter was closed mid-scan."""
     import shutil
     if config.INCOMING.is_dir():
         for leftover in config.INCOMING.glob("*.blotter"):
@@ -370,5 +372,6 @@ def clean_incoming() -> None:
                 leftover.unlink()
             except OSError:
                 pass
-        for folder in config.INCOMING.glob("unpack-*"):
-            shutil.rmtree(folder, ignore_errors=True)
+        for pattern in ("unpack-*", "work-*"):
+            for folder in config.INCOMING.glob(pattern):
+                shutil.rmtree(folder, ignore_errors=True)

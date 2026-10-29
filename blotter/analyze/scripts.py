@@ -80,22 +80,71 @@ _LANGUAGE = {"js": "js", "jse": "js", "hta": "js", "wsf": "js", "wsh": "js", "ps
 _ITEM = r"(?:'[^'\n]*'|\"[^\"\n]*\")"
 STRING_LIST = re.compile(rf"(?:\[|@\(|\barray\s*\()\s*{_ITEM}(?:\s*,\s*{_ITEM})+\s*,?\s*[\])]|"
                          rf"(?<==)\s*{_ITEM}(?:\s*,\s*{_ITEM}){{2,}}", re.I)
-# Code that builds commands out of text at run time: then a list of strings can be the real command.
-BUILDS_CODE = re.compile(r"invoke-expression|\biex\b|\beval\s*\(|\bexecute(?:global)?\s*[(\"]|new\s+function\s*\(|"
-                         r"scriptblock\]::create|\.invoke\s*\(|&\s*\(\s*\$|\.\s*\(\s*\$", re.I)
+# Code that runs text it gets at run time (from a variable, a list item or a string it builds). If the
+# script has any of these outside its lists, a list's strings may be the real command, so the lists count.
+# Looked for in the code without its lists, so a blocklist that names 'iex' doesn't count by itself.
+_LITERAL = r"(?:'[^'\n]*'|\"[^\"\n]*\")"
+_FIXED_ARG = rf"(?:{_LITERAL}|\[\s*(?:{_LITERAL}(?:\s*,\s*{_LITERAL})*)?\s*\])"  # plain text, or a list of it
+_PS_VARIABLE = r"[^\n;|]*\$"  # a variable later in the same command
+RUNS_TEXT = {
+    "ps1": [
+        ("Invoke-Expression", re.compile(r"\binvoke-expression\b|\biex\b", re.I)),
+        ("Invoke-Command", re.compile(r"\binvoke-command\b|\bicm\b", re.I)),
+        ("[scriptblock]::Create", re.compile(r"\[scriptblock\]\s*::\s*create|newscriptblock|\.invokescript\s*\(",
+                                             re.I)),
+        ("$ExecutionContext", re.compile(r"\$executioncontext\b", re.I)),
+        ("Add-Type", re.compile(r"\badd-type\b", re.I)),
+        ("a script block's .Invoke()", re.compile(r"\.invoke\s*\(", re.I)),
+        ("& (call operator)", re.compile(r"(?<![&\w-])&\s*(?:\$|\()", re.I)),
+        (". (dot source)", re.compile(r"(?:^|[\s;|{(=])\.\s+(?:\$|\()|(?<![\w\])}.'\"])\.\s*\(\s*\$", re.I | re.M)),
+        ("Start-Process with a variable", re.compile(rf"(?<![\w$.-])(?:start-process|saps|start)\b{_PS_VARIABLE}",
+                                                     re.I)),
+        ("cmd /c with a variable", re.compile(rf"\bcmd(?:\.exe)?['\"]?\s[^\n;|]*?/[ck]\b{_PS_VARIABLE}", re.I)),
+        ("powershell with a variable", re.compile(rf"\b(?:powershell|pwsh)(?:\.exe)?['\"]?\s{_PS_VARIABLE}", re.I)),
+    ],
+    "js": [
+        ("eval", re.compile(r"\beval\s*\(")),
+        ("Function()", re.compile(r"\bFunction\s*\(")),
+        # child_process (Node) or WScript.Shell (Windows Script Host), called with anything but plain text.
+        ("child_process with a variable", re.compile(
+            rf"(?s:child_process.*)\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\s*\("
+            rf"(?!\s*{_FIXED_ARG}(?:\s*,\s*{_FIXED_ARG})*\s*\))")),
+        ("WScript.Shell with a variable", re.compile(
+            rf"(?is:(?:wscript\.shell|shell\.application).*)\.(?:run|exec|shellexecute)\s*\("
+            rf"(?!\s*{_LITERAL}\s*[,)])", re.I)),
+    ],
+    "vbs": [
+        ("Execute / ExecuteGlobal", re.compile(r"(?<!\.)\bexecute(?:global)?\b", re.I)),  # not a RegExp's .Execute
+        ("Eval", re.compile(r"\beval\s*\(", re.I)),
+        ("WScript.Shell with a variable", re.compile(
+            r"\.(?:run|exec|shellexecute)\b(?![ \t]*\(?[ \t]*\"(?:\"\"|[^\"\n])*\"[ \t]*(?:[,)]|$))", re.I | re.M)),
+    ],
+    "bat": [
+        ("a variable run as a command", re.compile(r"(?:^[ \t]*@?|\bdo[ \t]+\(?[ \t]*)(?:call[ \t]+)?[%!][\w~%]",
+                                                   re.I | re.M)),
+        ("cmd /c with a variable", re.compile(r"\bcmd(?:\.exe)?\s[^\n]*?/[ck]\b[^\n]*[%!][\w~]", re.I)),
+        ("start with a variable", re.compile(r"^[ \t]*@?start\b[^\n]*[%!][\w~]", re.I | re.M)),
+        ("powershell with a variable", re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\s[^\n]*[%!][\w~]", re.I)),
+    ],
+}
+
+
+def runs_text(code: str, lang: str) -> list[str]:
+    """The kinds of code in `code` that run text they get at run time (see RUNS_TEXT)."""
+    return [name for name, pattern in RUNS_TEXT.get(lang, []) if pattern.search(code)]
 
 
 def code_only(text: str, kind: str) -> str:
-    """The script without its comments, and without plain lists of strings unless it builds code from text."""
+    """The script without its comments, and without plain lists of strings unless the rest of it has code
+    that runs text (then a list item can be the command it runs)."""
     lang = _LANGUAGE.get(kind)
     if not lang:
         return text
     strings, comments = _STRINGS.get(lang), _COMMENTS[lang]
     pattern = re.compile(f"({strings})|{comments}" if strings else comments, re.S)
     code = pattern.sub(lambda m: (m.group(1) if strings else None) or " ", text)
-    if not BUILDS_CODE.search(code):
-        code = STRING_LIST.sub(" ", code)
-    return code
+    without_lists = STRING_LIST.sub(" ", code)
+    return code if runs_text(without_lists, lang) else without_lists
 
 
 def decode(data: bytes) -> str:

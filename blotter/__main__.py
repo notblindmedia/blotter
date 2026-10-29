@@ -40,6 +40,41 @@ def _ping() -> str:
             return "other" if s.connect_ex((config.HOST, config.PORT)) == 0 else ""
 
 
+_CLOSE_EVENTS = (2, 5, 6)  # the window's X, logging off, shutting down
+
+
+def _on_close(stop) -> None:
+    """Call `stop` when Blotter's window is closed (Windows then gives a program about 5 seconds)."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    def handler(event):
+        if event in _CLOSE_EVENTS:
+            stop()
+        return False  # then Windows closes Blotter as usual
+
+    _on_close.handler = handler  # must stay alive as long as Blotter runs
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+
+
+def _stopper(app):
+    """Closing Blotter, once: cancel the deep-check queue, stop ClamAV, forget the page's code."""
+    from . import clamav
+    once = threading.Lock()
+
+    def stop():
+        if not once.acquire(blocking=False):
+            return
+        app.state.runner.close(wait=3)
+        clamav.service.stop("stopped")
+        TOKEN_FILE.unlink(missing_ok=True)
+
+    return stop
+
+
 def _page() -> str:
     return f"{config.URL}/?token={_saved_token()}"
 
@@ -79,6 +114,8 @@ def main() -> int:
     config.HOME.mkdir(parents=True, exist_ok=True)
     TOKEN_FILE.write_text(token, encoding="ascii")
     app = create_app(token=token)
+    stop = _stopper(app)
+    _on_close(stop)
     # Weekly YARA Forge refresh (skipped when the rules are less than a week old), and ClamAV while open.
     threading.Thread(target=lambda: (updates.rules(), yararules.load()), daemon=True).start()
     clamav.service.start()
@@ -89,8 +126,7 @@ def main() -> int:
     try:
         uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
     finally:
-        clamav.service.stop("stopped")
-        TOKEN_FILE.unlink(missing_ok=True)
+        stop()  # Ctrl+C, or the server stopping by itself
     return 0
 
 

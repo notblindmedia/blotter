@@ -194,7 +194,8 @@ class GroupingTests(unittest.TestCase):
 class CardTests(unittest.TestCase):
     def test_page_hides_trust_on_malicious(self):
         js = (Path(__file__).parent.parent / "blotter" / "static" / "app.js").read_text(encoding="utf-8")
-        self.assertIn('$("trust").hidden = !done || (malicious && !job.trusted);', js)
+        self.assertIn('$("trust").hidden = !shown || (malicious && !job.trusted);', js)
+        self.assertIn('const malicious = shown && job.verdict.verdict === "malicious";', js)
 
 
 if __name__ == "__main__":

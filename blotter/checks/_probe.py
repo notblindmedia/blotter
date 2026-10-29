@@ -21,6 +21,20 @@ def scan(path):
         del hog
     elif action == b"exit":
         os._exit(3)
+    elif action == b"priority":  # its own CPU priority class, and that of a program it starts (like capa)
+        import ctypes
+        import subprocess
+        import sys
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.GetPriorityClass.argtypes = (wintypes.HANDLE,)
+        own = k32.GetPriorityClass(k32.GetCurrentProcess())
+        child = subprocess.run([sys.executable, "-I", "-c", (
+            "import ctypes, sys; from ctypes import wintypes; k = ctypes.WinDLL('kernel32'); "
+            "k.GetCurrentProcess.restype = wintypes.HANDLE; k.GetPriorityClass.argtypes = (wintypes.HANDLE,); "
+            "sys.exit(k.GetPriorityClass(k.GetCurrentProcess()))")]).returncode
+        return [Finding("probe", CLEAR, f"priority: {own} {child}")]
     elif action == b"print":
         print("noise that must not confuse the runner")
     elif action.startswith(b"net "):  # net <host> <port>

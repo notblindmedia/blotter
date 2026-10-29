@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from ctypes import wintypes
 from pathlib import Path
 
@@ -251,14 +252,17 @@ def _env_block(env: dict):
     return ctypes.create_unicode_buffer(text, len(text))
 
 
-def run(command: list, workdir: Path, env: dict, timeout: float, memory_limit=None, _probing=False):
-    """Start command sandboxed, wait up to timeout. Returns the exit code, or None if it was stopped."""
+def run(command: list, workdir: Path, env: dict, timeout: float, memory_limit=None, _probing=False, priority=None,
+        cancel=None):
+    """Start command sandboxed, wait up to timeout. Returns the exit code, or None if it was stopped (timeout,
+    or `cancel`, a threading.Event, was set). `priority` (procs.BELOW_NORMAL) holds for it and its children."""
     state = public_state() if _probing else prepare()
     if state["mode"] == "job-only":
-        code, _, _ = procs.run(command, timeout=timeout, memory_limit=memory_limit, env=env)
+        code, _, _ = procs.run(command, timeout=timeout, memory_limit=memory_limit, env=env, priority=priority,
+                               cancel=cancel)
         return code
     cmdline = ctypes.create_unicode_buffer(subprocess.list2cmdline(command))
-    flags = _EXTENDED_STARTUPINFO | _CREATE_SUSPENDED | _CREATE_UNICODE_ENVIRONMENT | procs.NO_WINDOW
+    flags = _EXTENDED_STARTUPINFO | _CREATE_SUSPENDED | _CREATE_UNICODE_ENVIRONMENT | procs.NO_WINDOW | (priority or 0)
     pi = _ProcessInfo()
     block = _env_block(env)
     if state["mode"] == "appcontainer":
@@ -291,11 +295,11 @@ def run(command: list, workdir: Path, env: dict, timeout: float, memory_limit=No
         _k32.CloseHandle(token)
     if not ok:
         raise ctypes.WinError(ctypes.get_last_error())
-    job = procs.Job(memory_limit)
+    job = procs.Job(memory_limit, priority)
     try:
         job.add_handle(pi.hProcess)
         _k32.ResumeThread(pi.hThread)
-        if _k32.WaitForSingleObject(pi.hProcess, int(timeout * 1000)) != 0:
+        if not _wait(pi.hProcess, timeout, cancel):
             job.kill()
             _k32.TerminateProcess(pi.hProcess, 1)
             return None
@@ -306,6 +310,17 @@ def run(command: list, workdir: Path, env: dict, timeout: float, memory_limit=No
         job.close()
         _k32.CloseHandle(pi.hThread)
         _k32.CloseHandle(pi.hProcess)
+
+
+def _wait(process, timeout, cancel) -> bool:
+    """True when the process ended by itself within `timeout`; False on a timeout or a cancel."""
+    deadline = time.monotonic() + timeout
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0 or (cancel is not None and cancel.is_set()):
+            return False
+        if _k32.WaitForSingleObject(process, int(min(left, 0.25 if cancel is not None else left) * 1000)) == 0:
+            return True
 
 
 def _low_token():

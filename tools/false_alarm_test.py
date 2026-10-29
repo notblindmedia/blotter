@@ -4,8 +4,9 @@
 
 Target for about 100 trusted files (game mods included): 0 Malicious, at most 5 Suspicious.
 The originals are only read; Blotter checks copies, one file at a time by default (capa uses a lot
-of the PC; checking several at once makes it run out of time). Your "Trust this file" list is ignored
-here, so the numbers show what Blotter says on its own.
+of the PC; checking several at once makes it run out of time). Each file's answer is the final one,
+after the deep check has finished (the page shows an earlier answer while it runs; this test waits).
+Your "Trust this file" list is ignored here, so the numbers show what Blotter says on its own.
 Each result is saved as soon as it is known (a .jsonl file), and the report is always written, even if
 the run stops early or you press Ctrl+C. Both go to %LOCALAPPDATA%\\Blotter.
 """
@@ -29,7 +30,7 @@ from blotter.runner import Runner  # noqa: E402
 from blotter.verdict import VERDICTS  # noqa: E402
 
 ORDER = ["malicious", "suspicious", "unusual", "no_known_detections", "couldnt_fully_check", "couldnt_check"]
-JOB_TIMEOUT = 15 * 60
+JOB_TIMEOUT = 20 * 60  # each file's final answer, after the deep check (capa runs up to 15 minutes)
 
 
 def title(key: str) -> str:
@@ -165,6 +166,7 @@ def main(argv=None, checks=None) -> int:
     except Exception as e:  # never lose the results so far
         stopped = f"{type(e).__name__}: {e}"
     finally:
+        runner.close()  # after Ctrl+C: stop the deep check that runs, delete the copies
         clamav.service.stop("stopped")
         if not results and log_path.exists():  # crashed mid-run: rebuild from what was already saved
             for line in log_path.read_text(encoding="utf-8").splitlines():

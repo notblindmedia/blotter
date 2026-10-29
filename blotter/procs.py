@@ -10,11 +10,14 @@ No admin rights are needed for any of this.
 import ctypes
 import subprocess
 import sys
+import threading
 from ctypes import wintypes
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+BELOW_NORMAL = 0x4000  # BELOW_NORMAL_PRIORITY_CLASS: the deep check yields the CPU to everything else
 
 _KILL_ON_CLOSE = 0x2000
+_PRIORITY_CLASS = 0x20
 _JOB_MEMORY = 0x200
 _DIE_ON_UNHANDLED_EXCEPTION = 0x400
 _EXTENDED_LIMIT_INFORMATION = 9
@@ -54,9 +57,10 @@ if sys.platform == "win32":
 
 
 class Job:
-    """Processes added to a Job die when the Job is closed (or when Blotter exits)."""
+    """Processes added to a Job die when the Job is closed (or when Blotter exits). With `priority`
+    (BELOW_NORMAL), every process in it, and everything they start, runs at that priority."""
 
-    def __init__(self, memory_limit: int | None = None):
+    def __init__(self, memory_limit: int | None = None, priority: int | None = None):
         self.handle = None
         if sys.platform != "win32":
             return
@@ -68,6 +72,9 @@ class Job:
         if memory_limit:
             info.BasicLimitInformation.LimitFlags |= _JOB_MEMORY
             info.JobMemoryLimit = memory_limit
+        if priority:
+            info.BasicLimitInformation.LimitFlags |= _PRIORITY_CLASS
+            info.BasicLimitInformation.PriorityClass = priority
         if not _k32.SetInformationJobObject(handle, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info)):
             _k32.CloseHandle(handle)
             return
@@ -91,14 +98,20 @@ class Job:
             self.handle = None
 
 
-def run(command, input_bytes=b"", timeout=60, memory_limit=None, env=None):
-    """Run a command in its own job. Returns (exit code or None if it timed out, stdout bytes, stderr bytes)."""
-    job = Job(memory_limit)
+def run(command, input_bytes=b"", timeout=60, memory_limit=None, env=None, priority=None, cancel=None):
+    """Run a command in its own job. Returns (exit code or None if it timed out, stdout bytes, stderr bytes).
+    `cancel` (a threading.Event) stops it early, like a timeout."""
+    job = Job(memory_limit, priority)
     proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            creationflags=NO_WINDOW, env=env)
+                            creationflags=NO_WINDOW | (priority or 0), env=env)
     job.add(proc)
+    finished = threading.Event()
+    if cancel is not None:  # watch for a cancel while communicate() waits
+        threading.Thread(target=_watch, args=(cancel, finished, job, proc), daemon=True).start()
     try:
         out, err = proc.communicate(input_bytes, timeout=timeout)
+        if cancel is not None and cancel.is_set():
+            return None, out, err
         return proc.returncode, out, err
     except subprocess.TimeoutExpired:
         job.kill()
@@ -106,4 +119,13 @@ def run(command, input_bytes=b"", timeout=60, memory_limit=None, env=None):
         out, err = proc.communicate()
         return None, out, err
     finally:
+        finished.set()
         job.close()
+
+
+def _watch(cancel, finished, job, proc) -> None:
+    while not finished.wait(0.25):
+        if cancel.is_set():
+            job.kill()
+            proc.kill()
+            return

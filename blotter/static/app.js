@@ -16,6 +16,12 @@ function el(tag, text, className) {
   return node;
 }
 
+function ordinal(n) {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th";
+  return `${n}${suffix}`;
+}
+
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} bytes`;
   const units = ["KB", "MB", "GB"];
@@ -226,13 +232,23 @@ function showProblem(name, text) {
 function render(job) {
   currentJob = job;
   const done = job.state === "done";
+  // "deep_check": every check but the deep one (capa) has answered, so the card shows that answer now.
+  const shown = done || job.state === "deep_check";
   $("card-file").textContent = `${job.name} · ${formatSize(job.size)}`;
-  $("card").className = done ? `card v-${job.verdict.verdict}` : "card running";
-  $("card-verdict").textContent = done ? job.verdict.title : "Checking…";
-  $("card-summary").textContent = done ? job.verdict.summary : "Each check reports as soon as it finishes.";
-  $("card-reasons").replaceChildren(...(done ? job.verdict.reasons.map((r) => el("li", r)) : []));
-  $("progress").replaceChildren(...(done ? [] : job.checks.map((c) => {
-    const label = c.state === "done" ? "done" : c.state === "running" ? "working…" : "waiting…";
+  $("card").className = shown ? `card v-${job.verdict.verdict}` : "card running";
+  $("card-verdict").textContent = shown ? job.verdict.title : "Checking…";
+  $("card-summary").textContent = shown ? job.verdict.summary : "Each check reports as soon as it finishes.";
+  $("card-reasons").replaceChildren(...(shown ? job.verdict.reasons.map((r) => el("li", r)) : []));
+  const still = shown && !done;
+  $("card-pending").hidden = !still;
+  // Deep checks run one at a time; deep_queue is this file's place in line (1 = next), null once it runs.
+  $("card-pending").textContent = !still ? "" : (job.deep_queue
+    ? `Deep check queued, ${ordinal(job.deep_queue)} in line. Deep checks run one at a time so the PC stays quick. `
+    : "Deep check still running… capa is still reading the program's code (up to 15 minutes). ") +
+    "This answer can still change; the card updates by itself.";
+  $("progress").replaceChildren(...(shown ? [] : job.checks.map((c) => {
+    const label = c.state === "done" ? "done" : c.state === "running" ? "working…" :
+      c.state === "queued" ? "in line…" : "waiting…";
     return el("li", `${c.name}: ${label}`, c.state === "done" ? "done" : "");
   })));
 
@@ -240,10 +256,10 @@ function render(job) {
   $("open-vt").href = `https://www.virustotal.com/gui/file/${job.sha256}`;
   $("vt-state").textContent = vtState(job.checks.find((c) => c.id === "virustotal"));
   // A Malicious result can't be trusted; a file trusted earlier can still be un-trusted.
-  const malicious = done && job.verdict.verdict === "malicious";
-  $("trust").hidden = !done || (malicious && !job.trusted);
+  const malicious = shown && job.verdict.verdict === "malicious";
+  $("trust").hidden = !shown || (malicious && !job.trusted);
   $("trust").textContent = job.trusted ? "Stop trusting this file" : "Trust this file";
-  $("quarantine").hidden = !(done && job.source_path);
+  $("quarantine").hidden = !(shown && job.source_path);
   $("password-form").hidden = !(done && job.needs_password);
   $("password-hint").hidden = !(done && job.needs_password);
 
@@ -277,7 +293,8 @@ function renderCheck(check) {
     const when = new Date(check.cached_at * 1000).toLocaleString();
     box.append(el("p", `Remembered answer from ${when} (no quota used).`, "hint"));
   }
-  if (check.state !== "done") box.append(el("p", "Still working…", "hint"));
+  if (check.state === "queued") box.append(el("p", "Waiting in line for the deep check.", "hint"));
+  else if (check.state !== "done") box.append(el("p", "Still working…", "hint"));
   for (const finding of check.findings) {
     box.append(el("p", finding.text, finding.level === "skipped" ? "hint" : null));
     const d = finding.details || {};

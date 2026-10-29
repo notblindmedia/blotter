@@ -20,10 +20,11 @@ from ..findings import (CLEAR, ERROR, SKIPPED, SUSPICIOUS, WEAK, Finding, detect
 ID = "capa"
 NAME = "Abilities (capa)"
 ORDER = 55
-TIMEOUT = 300
+TIMEOUT = 15 * 60
 CACHE = True          # capa is slow and gives the same answer for the same file and rules
 CACHE_VERSION = "capa-9.4.0-1"  # change when the rules, capa or the ability list change
 NEEDS_FILE = True
+BACKGROUND = True     # the deep check: the answer is shown without it and updated when it finishes (runner.py)
 
 CAPA_TIMEOUT = TIMEOUT - 15
 MAX_SIZE = 25 * 1024 * 1024
@@ -117,9 +118,10 @@ def scan(path) -> list[Finding]:
                           {"deep_check": True})]
     if not config.CAPA_RULES.is_dir():
         return [Finding(ID, ERROR, "capa's rules aren't downloaded yet (run Update rules in Settings).")]
-    code, out, err = procs.run(command(target), timeout=CAPA_TIMEOUT, memory_limit=config.WORKER_MEMORY)
+    code, out, err = procs.run(command(target), timeout=CAPA_TIMEOUT, memory_limit=config.WORKER_MEMORY,
+                               priority=procs.BELOW_NORMAL)  # the deep check never slows the PC down
     if code is None:
-        return [unchecked(ID, f"capa needed more than {CAPA_TIMEOUT} seconds for this program, so Blotter "
+        return [unchecked(ID, f"capa didn't finish this program within {TIMEOUT // 60} minutes, so Blotter "
                               "stopped it. Programs with very many functions can take that long.",
                           {"deep_check": True})]
     try:

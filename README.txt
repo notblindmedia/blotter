@@ -57,11 +57,20 @@ the sandbox.
    - capa (by Mandiant) reads a program's machine code and names its
      abilities, such as "injects code into other programs" or "starts itself
      with Windows". It looks at the program itself, without data appended
-     after it (installer payloads or padding). Its answers are remembered, so
-     checking the same program again is instant. Blotter runs capa with a
-     speed fix for vivisect (the disassembler capa uses), made for vivisect
-     1.3.2 only; with any other version capa runs without it (slower, same
-     results) and the card says so.
+     after it (installer payloads or padding). capa is the deep check: it can
+     take minutes, so the card shows the other checks' answer first with
+     "Deep check still running…", and updates when capa finishes (it gets up
+     to 15 minutes). Engine detections never wait for it. Deep checks run
+     one at a time, oldest first, at below-normal CPU priority, so checking
+     a batch of files can't slow the PC down; a file that waits says "Deep
+     check queued, 3rd in line" (its 15 minutes start when its turn comes).
+     Closing Blotter cancels the queue and stops the deep check that is
+     running; anything left behind is removed at the next start. Its
+     answers are remembered, so checking the same program
+     again is instant. Blotter runs capa with a speed fix for vivisect (the
+     disassembler capa uses), made for vivisect 1.3.2 only; with any other
+     version capa runs without it (slower, same results) and the card says
+     so.
    - Program check: is it digitally signed, by whom, and is the signature
      still valid? Windows also checks its catalog files, so its own programs
      (System32) count as signed by Microsoft even as copies. Is it packed
@@ -72,7 +81,8 @@ the sandbox.
      abilities stay listed on the card but don't raise the answer. The list
      is short and you can edit it: rules\trusted-publishers.txt (Microsoft,
      Google, Apple, Valve, Mozilla, NVIDIA, AMD, Intel, Adobe, Oracle,
-     Discord, Python, Git for Windows). Any other valid signature counts for
+     Discord, Python, Git for Windows, Tailscale, Node.js, Roblox, Anthropic,
+     Obsidian, NetEase). Any other valid signature counts for
      a little: it forgives one warning sign, no more, because any company
      can buy a signing certificate. Engine detections that name malware are
      never quieted, and a certificate on the stolen list
@@ -90,8 +100,15 @@ the sandbox.
      code, attempts to switch off Microsoft Defender. Web requests that only
      go to this PC itself (127.0.0.1, localhost) don't count as downloads,
      and neither do download commands that only appear in comments or in a
-     list of names (a blocklist such as ['curl', 'wget', 'iwr']). If the
-     script builds commands out of text (iex, eval), such a list counts.
+     list of names (a blocklist such as ['curl', 'wget', 'iwr']). Such a
+     list only counts as harmless if nothing else in the script runs text it
+     gets at run time: PowerShell's iex / Invoke-Expression, Invoke-Command,
+     & or . with a variable, Start-Process, cmd /c or powershell with a
+     variable, [scriptblock]::Create, $ExecutionContext, Add-Type;
+     JavaScript's eval, Function(), child_process or WScript.Shell with a
+     variable; VBScript's Execute, ExecuteGlobal, Eval or .Run with a
+     variable; a batch variable run as a command. If any of those is there,
+     the lists count like any other code.
 
 3. Who knows it
    - ClamAV (an open-source antivirus) and Microsoft Defender scan it here on
@@ -143,10 +160,10 @@ No known detections
 Couldn't fully check
   Part of the file was over a limit: too big for a check (for example
   programs over 25 MB for capa), archives nested too deep, a check that took
-  too long or ran out of memory, or a locked archive. Blotter then never says
-  "No known detections", because what it couldn't check might be the
-  dangerous part. Warnings it did find still show (and Malicious or
-  Suspicious still win).
+  too long (capa: 15 minutes) or ran out of memory, or a locked archive.
+  Blotter then never says "No known detections", because what it couldn't
+  check might be the dangerous part. Warnings it did find still show (and
+  Malicious or Suspicious still win).
   Exception: for a program signed by a well-known publisher that capa had to
   skip (too big or too slow), the card says "Signed by <publisher>, deep
   check skipped" instead. Unsigned programs, and programs signed by anyone
@@ -213,8 +230,11 @@ USING IT
    - "Choose a file on this PC..." (or paste its path). Blotter then knows
      where the real file is, so it can quarantine it from the result.
 
-4. The answer appears in a few seconds to a minute (capa takes longest on
-   big programs). Under the answer:
+4. The answer appears in a few seconds to a minute. For programs, capa (the
+   deep check) may still be working: the card then says "Deep check still
+   running…" (or "Deep check queued, 2nd in line" while other files' deep
+   checks go first) and updates by itself when it is done (up to 15 minutes
+   each). The answer can still change until then. Under the answer:
    - "Open on VirusTotal" opens the file's VirusTotal page in your browser.
      Only the fingerprint is in the address; nothing is uploaded.
    - "Trust this file" puts it on your own trusted list (by fingerprint).
@@ -331,8 +351,9 @@ known detections", with its reasons. Target: 0 Malicious and at most 5
 Suspicious.
 The report is saved in %LOCALAPPDATA%\Blotter even if the run stops early
 (each result is also saved the moment it is known, in a .jsonl file next to
-it). Big programs take a minute or two each for capa; with a VirusTotal key,
-lookups add 15 seconds a file (4 a minute). To skip the online
+it). The test waits for each file's final answer, after the deep check. Big
+programs take a minute or two each for capa (a few up to 15); with a
+VirusTotal key, lookups add 15 seconds a file (4 a minute). To skip the online
 lookups, open a command window in the Blotter folder and run:
 
     .venv\Scripts\python tools\false_alarm_test.py "D:\My trusted files" --offline

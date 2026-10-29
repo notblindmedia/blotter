@@ -58,3 +58,11 @@ Python Software Foundation       # seen
 
 # Git for Windows: its releases are signed by its maintainer
 Johannes Schindelin              # seen (Git for Windows installer and git.exe)
+
+# Added by the Doctor's choice (2026-10-29), spellings read from the real files on Inkwell.
+Tailscale Inc.                   # seen (tailscale.exe, tailscale-ipn.exe, the installer)
+OpenJS Foundation                # seen (Node.js: node.exe)
+Roblox Corporation               # seen (RobloxStudioInstaller.exe)
+Anthropic, PBC                   # seen (ClaudeSetup.exe)
+Dynalist Inc                     # seen (Obsidian.exe; Obsidian's company)
+NetEase (Hangzhou) Network Co., Ltd   # seen (Once Human: ONCE_HUMAN.exe and its NtUniSdk DLLs)
