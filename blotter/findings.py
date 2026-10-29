@@ -20,14 +20,15 @@ HIDING = "hiding"                  # hides what it is or does: obfuscation, anti
 LYING_NAME = "lying_name"          # the name doesn't match the real contents
 DISGUISED = "disguised"            # a program or script dressed up as a document, picture or video
 PACKED = "packed"                  # a program whose code is compressed or scrambled
+PADDED = "padded"                  # a program with lots of empty filler appended (against size limits)
 SIGNED = "signed"                  # a program with a valid digital signature
 UNSIGNED = "unsigned"              # a program without a valid signature
 UNKNOWN_ONLINE = "unknown_online"  # VirusTotal has never seen this file
 KNOWN_GOOD = "known_good"          # CIRCL hashlookup lists it as known, common software
 UNCHECKED = "unchecked"            # part of the file couldn't be looked at (locked or oversized archive)
 
-SIGNALS = (RISKY, WEAK, HIDING, LYING_NAME, DISGUISED, PACKED, SIGNED, UNSIGNED, UNKNOWN_ONLINE, KNOWN_GOOD,
-           UNCHECKED)
+SIGNALS = (RISKY, WEAK, HIDING, LYING_NAME, DISGUISED, PACKED, PADDED, SIGNED, UNSIGNED, UNKNOWN_ONLINE,
+           KNOWN_GOOD, UNCHECKED)
 
 
 @dataclass

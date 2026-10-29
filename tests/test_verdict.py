@@ -201,7 +201,8 @@ class WeakSignTests(unittest.TestCase):
         signed = analyze(fake_pe([(".text", noise)], ["_CorDllMain"], dotnet=True),
                          {"status": "Valid", "signer": "Example"})
         self.assertEqual(decide(signed)["verdict"], "no_known_detections")
-        self.assertEqual(decide(signed + vt_unknown)["verdict"], "unusual")
+        # A trusted publisher's signature quiets weak signs too, even when VirusTotal never saw the file.
+        self.assertEqual(decide(signed + vt_unknown)["verdict"], "no_known_detections")
 
 
 class NoSafeWordInSourceTests(unittest.TestCase):

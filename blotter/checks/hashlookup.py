@@ -4,16 +4,20 @@ No key, no account. Only the SHA-256 is sent. A hit lowers suspicion; a miss mea
 (most files, mods especially, aren't in these collections).
 """
 
+import os
+
 import requests
 
 from .. import hashing, network
-from ..findings import CLEAR, ERROR, KNOWN_GOOD, NOTE, UNKNOWN, Finding
+from ..findings import CLEAR, ERROR, KNOWN_GOOD, NOTE, SKIPPED, UNKNOWN, Finding
 
 ID = "hashlookup"
 NAME = "CIRCL hashlookup"
 ORDER = 25
 TIMEOUT = 30
 CACHE = True
+CACHE_VERSION = 2  # 2: files under 1 KB are no longer looked up
+MIN_SIZE = 1024
 NEEDS_FILE = False
 
 API_URL = "https://hashlookup.circl.lu/lookup/sha256/"
@@ -21,6 +25,13 @@ REQUEST_TIMEOUT = (5, 15)
 
 
 def scan(path) -> list[Finding]:
+    try:
+        tiny = os.path.getsize(path) < MIN_SIZE
+    except OSError:
+        tiny = False  # the copy is already gone (Defender); the fingerprint is still known
+    if tiny:
+        return [Finding(ID, SKIPPED, "CIRCL hashlookup isn't asked about files under 1 KB: empty and tiny files "
+                                     "share their fingerprint with unrelated files, so \"known\" would mean nothing.")]
     sha = hashing.sha256_file(path)
     try:
         response = network.get(API_URL + sha, headers={"Accept": "application/json"}, timeout=REQUEST_TIMEOUT)

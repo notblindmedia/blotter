@@ -5,6 +5,12 @@ Suspicious           a warning sign on its own (a few antivirus engines, a broke
                      a program disguised as another kind of file, or
                      risky abilities PLUS hiding / a lying name / packed and unsigned / unknown everywhere
 Unusual              risky abilities only
+
+A valid signature from a trusted publisher (not on rules/stolen-certificates.txt) quiets the program's
+abilities (capa, program and script patterns): they stay listed but don't raise the answer. If capa
+had to skip such a program (too big, too slow), the card says "Signed by <publisher>, deep check
+skipped" instead of "Couldn't fully check". Engine detections are never quieted.
+An unsigned program padded with lots of empty filler is Suspicious on its own.
 No known detections  checks ran and found nothing
 
 Weak signs (things ordinary programs do all the time: a runtime changing its own memory, talking to a
@@ -23,8 +29,9 @@ recognises it as malware or couldn't finish.
 import re
 from collections import defaultdict
 
-from .findings import (CLEAR, DISGUISED, ERROR, HIDING, KNOWN_GOOD, LYING_NAME, MALICIOUS, NOTE, PACKED,
-                       RISKY, SIGNED, SKIPPED, SUSPICIOUS, UNCHECKED, UNKNOWN, UNKNOWN_ONLINE, UNSIGNED, WEAK)
+from .findings import (CLEAR, DISGUISED, ERROR, HIDING, KNOWN_GOOD, LYING_NAME, MALICIOUS, NOTE, PACKED, PADDED,
+                       RISKY, SIGNED, SKIPPED, SUSPICIOUS, UNCHECKED, UNKNOWN, UNKNOWN_ONLINE, UNSIGNED, WEAK,
+                       Finding)
 
 VERDICTS = {
     "malicious": (
@@ -78,6 +85,16 @@ def _weak(signals, unknown_everywhere):
     return level, ["signs that are common on their own add up: " + ", ".join(words)]
 
 
+def _deep_check_skipped(f, signed_by):
+    """For a program signed by a trusted publisher, capa being skipped (too big or too slow) isn't a gap
+    worth "Couldn't fully check": say so plainly instead. Unsigned programs keep the warning."""
+    scope = f.details.get("scope", "")
+    if not f.details.get("deep_check") or scope not in signed_by:
+        return f
+    return Finding(f.check, NOTE, f"Signed by {signed_by[scope]}, deep check skipped.", dict(f.details),
+                   [s for s in f.signals if s != UNCHECKED])
+
+
 def _vt_words(f) -> str:
     """'1 VirusTotal engine flags it' / '2 VirusTotal engines flag it' / '... call it suspicious'."""
     mal, sus = int(f.details.get("malicious") or 0), int(f.details.get("suspicious") or 0)
@@ -96,14 +113,27 @@ def _abilities(findings):
 
 def decide(findings, trusted=False) -> dict:
     findings = list(findings)
+    # Programs signed by a trusted publisher (valid signature, not on the stolen-certificate list).
+    signed_by = {f.details.get("scope", ""): f.details["trusted_publisher"] for f in findings
+                 if f.details.get("trusted_publisher") and SIGNED in f.signals}
+    findings = [_deep_check_skipped(f, signed_by) for f in findings]
     levels = {f.level for f in findings}
     everything = set().union(*(f.signals for f in findings)) if findings else set()
     unknown_everywhere = UNKNOWN_ONLINE in everything and KNOWN_GOOD not in everything
 
-    heuristic, why, counted = None, [], set()
+    heuristic, why, counted, quieted = None, [], set(), []
     for scope, signals in _abilities(findings).items():
         if DISGUISED in signals:
             level, reasons = "suspicious", ["it is a program or script dressed up as another kind of file"]
+        elif PADDED in signals and SIGNED not in signals:
+            level, reasons = "suspicious", ["it is an unsigned program padded with empty filler, a trick to get "
+                                            "past scanners' size limits"]
+        elif scope in signed_by:
+            # A trusted publisher's program: what it can do is what such programs normally do. Its abilities
+            # stay on the card but don't raise the answer. Engine detections are counted further down as usual.
+            if signals & {RISKY, HIDING, WEAK, PACKED}:
+                quieted.append(signed_by[scope])
+            continue
         elif RISKY in signals:
             reasons = [_WHY[s] for s in (HIDING, LYING_NAME) if s in signals]
             if PACKED in signals and SIGNED not in signals:
@@ -139,6 +169,9 @@ def decide(findings, trusted=False) -> dict:
 
     title, summary = VERDICTS[key]
     notes = []
+    if quieted and key in ("no_known_detections", "unusual"):
+        notes.append(f"It is signed by {quieted[0]}, a trusted publisher, so what it can do (listed below) "
+                     "doesn't raise a warning.")
     if key == heuristic and why:
         sentence = ("It can do risky things, and " if RISKY in everything else "") + ", and ".join(why)
         notes.append(sentence[0].upper() + sentence[1:] + ".")

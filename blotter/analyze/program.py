@@ -8,8 +8,8 @@ import json
 import math
 import os
 
-from .. import procs
-from ..findings import CLEAR, NOTE, PACKED, SIGNED, SUSPICIOUS, UNSIGNED, Finding, risky, weak
+from .. import config, procs
+from ..findings import CLEAR, NOTE, PACKED, PADDED, SIGNED, SUSPICIOUS, UNSIGNED, Finding, detected, risky, weak
 
 PACKER_SECTIONS = {
     "upx0": "UPX", "upx1": "UPX", ".aspack": "ASPack", ".adata": "ASPack", ".vmp0": "VMProtect",
@@ -24,6 +24,31 @@ INJECT_RUN = {"CreateRemoteThread", "CreateRemoteThreadEx", "NtCreateThreadEx", 
 DOWNLOAD = {"URLDownloadToFileA", "URLDownloadToFileW", "URLDownloadToCacheFileA", "URLDownloadToCacheFileW"}
 DRIVER = {"NtLoadDriver", "ZwLoadDriver"}
 SIGNATURE_TIMEOUT = 40
+PADDING_MIN = 10 * 1024 * 1024  # appended filler from this size on counts as padding
+
+
+def overlay(path) -> dict | None:
+    """Data appended after the program's last section: {'start', 'size', 'entropy'} or None.
+    Reads only samples of it, so a 300 MB file costs a few MB."""
+    import pefile
+    try:
+        pe = pefile.PE(str(path), fast_load=True)
+        try:
+            start = pe.get_overlay_data_start_offset()
+        finally:
+            pe.close()
+    except (pefile.PEFormatError, OSError, ValueError, AttributeError):
+        return None  # not a readable program: nothing to say about what follows it
+    if start is None:
+        return None
+    total = os.path.getsize(path)
+    size = total - start
+    samples = []
+    with open(path, "rb") as f:
+        for i in range(16):
+            f.seek(start + size * i // 16)
+            samples.append(f.read(64 * 1024))
+    return {"start": start, "size": size, "entropy": round(entropy(b"".join(samples)), 2)}
 
 
 def entropy(data: bytes) -> float:
@@ -35,10 +60,15 @@ def entropy(data: bytes) -> float:
 
 
 def signature(path) -> dict:
-    """Windows' verdict on the digital signature: {'status', 'signer'} (status 'Valid', 'NotSigned', ...)."""
-    script = ("$s = Get-AuthenticodeSignature -LiteralPath $env:BLOTTER_SIGNED_FILE; "
-              "[pscustomobject]@{status = [string]$s.Status; signer = [string]$s.SignerCertificate.Subject; "
-              "kind = [string]$s.SignatureType} | ConvertTo-Json -Compress")
+    """Windows' verdict on the digital signature: {'status', 'signer', 'kind', 'serial', 'thumbprint', 'issuer'}.
+
+    Get-AuthenticodeSignature asks Windows' WinVerifyTrust, which checks both a signature inside the file
+    and Windows' catalog files (how System32 programs like kernel32.dll are signed), so copies count too.
+    """
+    script = ("$s = Get-AuthenticodeSignature -LiteralPath $env:BLOTTER_SIGNED_FILE; $c = $s.SignerCertificate; "
+              "[pscustomobject]@{status = [string]$s.Status; signer = [string]$c.Subject; "
+              "kind = [string]$s.SignatureType; serial = [string]$c.SerialNumber; "
+              "thumbprint = [string]$c.Thumbprint; issuer = [string]$c.Issuer} | ConvertTo-Json -Compress")
     env = {**os.environ, "BLOTTER_SIGNED_FILE": str(path)}
     command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script]
     try:
@@ -52,7 +82,24 @@ def signature(path) -> dict:
     except (ValueError, IndexError):
         return {"status": "Unavailable", "signer": ""}
     return {"status": result.get("status") or "Unavailable", "signer": _common_name(result.get("signer") or ""),
-            "kind": result.get("kind") or ""}
+            "kind": result.get("kind") or "", "serial": (result.get("serial") or "").lower(),
+            "thumbprint": (result.get("thumbprint") or "").lower(),
+            "issuer": _common_name(result.get("issuer") or "")}
+
+
+def stolen_certificates() -> dict:
+    """{serial or thumbprint (lower-case hex): note} from rules/stolen-certificates.txt."""
+    out = {}
+    try:
+        lines = (config.OWN_RULES / "stolen-certificates.txt").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        value, _, note = line.partition("#")
+        value = value.strip().replace(" ", "").replace(":", "").lower()
+        if value:
+            out[value] = note.strip()
+    return out
 
 
 def _common_name(subject: str) -> str:
@@ -103,6 +150,13 @@ def analyze(check, path, scope=None, check_signature=True) -> list[Finding]:
     if check_signature:
         out += signature_findings(check, path, details)
 
+    info = overlay(path)
+    if info and info["size"] >= PADDING_MIN and info["size"] > info["start"] and info["entropy"] < 1.0:
+        out.append(Finding(check, NOTE,
+            f"It carries {info['size'] / 1024 ** 2:.0f} MB of empty filler after the real program "
+            f"({info['start'] / 1024 ** 2:.1f} MB). Padding a program like that is a trick to get past "
+            "scanners' size limits; Blotter checked the program without it.",
+            {**s, "overlay": info, "ability": "padded"}, [PADDED]))
     if dotnet_dense:
         out.append(weak(check, "dotnet-compressed",
             "Part of its code section is compressed or scrambled. In .NET programs that is usually packed-in "
@@ -137,7 +191,15 @@ def signature_findings(check, path, details=None) -> list[Finding]:
     details["signature"] = signed
     status, signer = signed["status"], signed["signer"]
     if status == "Valid":
+        stolen = stolen_certificates()
+        hit = next((stolen[k] for k in (signed.get("serial"), signed.get("thumbprint")) if k and k in stolen), None)
+        if hit is not None:
+            return [detected(Finding(check, SUSPICIOUS,
+                f"It is signed by {signer or 'a publisher'}, but with a certificate known to be stolen and used "
+                f"for malware ({hit or 'on Blotter list'}). Such a signature proves nothing.", details),
+                "Blotter", "stolen certificate")]
         how = " (through a Windows catalog)" if signed.get("kind") == "Catalog" else ""
+        details["trusted_publisher"] = signer or "a known publisher"
         return [Finding(check, CLEAR, f"It is digitally signed by {signer or 'a known publisher'}{how}, "
                                       "and Windows says the signature is valid.", details, [SIGNED])]
     if status == "HashMismatch":

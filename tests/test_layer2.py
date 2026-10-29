@@ -125,7 +125,7 @@ def fake_pe(sections, imports, dotnet=False):
     dirs[14].VirtualAddress = 0x2000 if dotnet else 0
     return types.SimpleNamespace(parse_data_directories=lambda **k: None, DIRECTORY_ENTRY_IMPORT=[entry],
                                  sections=secs, OPTIONAL_HEADER=types.SimpleNamespace(DATA_DIRECTORY=dirs),
-                                 close=lambda: None)
+                                 close=lambda: None, get_overlay_data_start_offset=lambda: None)
 
 
 class ProgramTests(unittest.TestCase):
@@ -266,7 +266,7 @@ class CapaTests(unittest.TestCase):
     def test_command_reads_no_user_settings(self):
         cmd = capabilities.command("x.blotter")
         self.assertEqual(cmd[1:4], ["-I", "-B", "-c"])
-        self.assertIn("run_module('capa.main'", cmd[4])
+        self.assertIn("run_module('blotter.capa_fast'", cmd[4])
         self.assertIn("-j", cmd)
 
 

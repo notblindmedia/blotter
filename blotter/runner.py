@@ -127,7 +127,7 @@ class Runner:
     def _run_check(self, job, check, path, save_error, force):
         cached = None
         if getattr(check, "CACHE", False) and not force:
-            cached = self.cache.get(job.sha256, check.ID)
+            cached = self.cache.get(job.sha256, _cache_id(check))
         if cached:
             self._finish(job, check.ID, cached[0], cached_at=cached[1])
             return
@@ -151,8 +151,10 @@ class Runner:
             signals = [UNCHECKED] if isolated(check) else []
             findings = [Finding(check.ID, ERROR, f"{check.NAME} failed unexpectedly ({type(e).__name__}).",
                                 {"error": str(e)[:300]}, signals)]
-        if getattr(check, "CACHE", False) and not any(f.level in (ERROR, SKIPPED) for f in findings):
-            self.cache.put(job.sha256, check.ID, findings)
+        # Remember only complete answers: not errors, skips (no key yet), or anything cut short by a limit.
+        if getattr(check, "CACHE", False) and not any(f.level in (ERROR, SKIPPED) or UNCHECKED in f.signals
+                                                      for f in findings):
+            self.cache.put(job.sha256, _cache_id(check), findings)
         self._finish(job, check.ID, findings)
 
     def _finish(self, job, check_id, findings, cached_at=None):
@@ -161,6 +163,12 @@ class Runner:
             if entry["state"] == "done":
                 return  # already timed out; ignore the late answer
             entry.update(state="done", findings=list(findings), cached_at=cached_at)
+
+
+def _cache_id(check) -> str:
+    """The cache key for a check; CACHE_VERSION lets a check retire old remembered answers."""
+    version = getattr(check, "CACHE_VERSION", None)
+    return f"{check.ID}@{version}" if version else check.ID
 
 
 def _delete(path) -> None:

@@ -308,3 +308,21 @@ def minimal_pe(dll=False) -> bytes:
     struct.pack_into("<H", optional, 0, 0x10B)
     struct.pack_into("<H", optional, 68, 2)  # subsystem: Windows GUI
     return bytes(mz) + coff + bytes(optional) + bytes(512)
+
+
+def pe_with_section(size: int) -> bytes:
+    """A program header with one code section of `size` random-looking bytes and nothing after it
+    (no overlay). Not runnable; enough for the size limits."""
+    import random
+    mz = bytearray(0x80)
+    mz[0:2] = b"MZ"
+    struct.pack_into("<I", mz, 0x3C, 0x80)
+    coff = struct.pack("<4sHHIIIHH", b"PE\0\0", 0x14C, 1, 0, 0, 0, 0xE0, 0x0102)
+    optional = bytearray(0xE0)
+    struct.pack_into("<H", optional, 0, 0x10B)
+    struct.pack_into("<II", optional, 32, 0x1000, 0x200)       # section and file alignment
+    struct.pack_into("<II", optional, 56, 0x1000 + size, 0x400)  # size of image, size of headers
+    struct.pack_into("<H", optional, 68, 2)
+    section = struct.pack("<8sIIIIIIHHI", b".text", size, 0x1000, size, 0x400, 0, 0, 0, 0, 0x60000020)
+    header = bytes(mz) + coff + bytes(optional) + section
+    return header + bytes(0x400 - len(header)) + random.Random(5).randbytes(size)

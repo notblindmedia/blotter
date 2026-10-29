@@ -50,6 +50,17 @@ SHELLS = {"powershell.exe", "pwsh.exe", "cmd.exe", "mshta.exe", "wscript.exe", "
           "regsvr32.exe", "certutil.exe", "bitsadmin.exe", "conhost.exe", "forfiles.exe", "msiexec.exe"}
 
 
+URL_HOST = re.compile(r"\bhttps?://(\[[0-9a-f:.]+\]|[^\s/:'\"`]+)", re.I)
+THIS_PC = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _only_this_pc(text: str) -> bool:
+    """True when every web address in the script is this PC (a health check, a local server): that isn't
+    downloading anything from the internet. Scripts without a visible address still count."""
+    hosts = {h.lower().strip("[]") for h in URL_HOST.findall(text)}
+    return bool(hosts) and hosts <= THIS_PC
+
+
 def decode(data: bytes) -> str:
     data = data[:MAX_TEXT]
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
@@ -63,7 +74,7 @@ def analyze_text(check, text, kind, scope=None, where="It") -> list[Finding]:
     """`kind` is the file ending (ps1, bat, ...) or 'lnk' for a shortcut's command line."""
     s = {"scope": scope} if scope else {}
     out = []
-    downloads, runs = bool(DOWNLOAD.search(text)), bool(EXECUTE.search(text))
+    downloads, runs = bool(DOWNLOAD.search(text)) and not _only_this_pc(text), bool(EXECUTE.search(text))
     if downloads and runs:
         out.append(risky(check, "download-run",
             f"{where} downloads something from the internet and runs it. Installers and setup scripts do that "

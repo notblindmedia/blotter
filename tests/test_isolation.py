@@ -93,10 +93,10 @@ class SandboxTests(unittest.TestCase):
         other = Path(tempfile.mkdtemp()) / "someone-elses-file.txt"
         other.write_text("private")
         self.assertTrue(self.probe(b"read " + str(other).encode()).startswith("read: blocked"))
+        Cache(config.DB_PATH).close()  # make sure Blotter's (test) cache really exists, as a real database
+        from blotter import settings
+        settings.update({})
         for private in (config.DB_PATH, config.SETTINGS_PATH, Path.home() / "Documents"):
-            private.parent.mkdir(parents=True, exist_ok=True)
-            if not private.exists():
-                private.write_text("x") if private.suffix else private.mkdir(exist_ok=True)
             target = private if private.is_file() else next(iter(private.glob("*")), private)
             self.assertTrue(self.probe(b"read " + str(target).encode()).startswith("read: blocked"), target)
         self.assertEqual(self.probe(b"read " + str(other).encode(), sandboxed=False), "read: allowed")

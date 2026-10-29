@@ -56,10 +56,19 @@ the sandbox.
      "rules" folder.
    - capa (by Mandiant) reads a program's machine code and names its
      abilities, such as "injects code into other programs" or "starts itself
-     with Windows".
+     with Windows". It looks at the program itself, without data appended
+     after it (installer payloads or padding). Its answers are remembered, so
+     checking the same program again is instant.
    - Program check: is it digitally signed, by whom, and is the signature
-     still valid? Is it packed (its code hidden until it runs)? Does it use
-     risky combinations of Windows functions?
+     still valid? Windows also checks its catalog files, so its own programs
+     (System32) count as signed by Microsoft even as copies. Is it packed
+     (its code hidden until it runs)? Is it padded with empty filler to look
+     bigger than it is? Does it use risky combinations of Windows functions?
+   - A valid signature from a trusted publisher quiets the warnings about
+     what a program can do (Microsoft's own tools can do a lot). Those
+     abilities stay listed on the card but don't raise the answer. Engine
+     detections are never quieted, and a certificate on the stolen list
+     (rules\stolen-certificates.txt) counts as a warning, not as trust.
    - Office documents: macros (with oletools), auto-run macros, scrambled
      macro code, documents that fetch content from the internet.
    - PDFs: JavaScript, actions that run by themselves when the PDF opens,
@@ -67,13 +76,15 @@ the sandbox.
      disguised to slip past scanners. Read as bytes, never opened.
    - Scripts and shortcuts (.ps1 .bat .cmd .vbs .js .hta .wsf .lnk ...):
      download-and-run lines, hidden windows, encoded commands, scrambled
-     code, attempts to switch off Microsoft Defender.
+     code, attempts to switch off Microsoft Defender. Web requests that only
+     go to this PC itself (127.0.0.1, localhost) don't count as downloads.
 
 3. Who knows it
    - ClamAV (an open-source antivirus) and Microsoft Defender scan it here on
      your PC.
    - CIRCL hashlookup (no account needed) says whether it is known, common
-     software. That lowers suspicion.
+     software. That lowers suspicion. Files under 1 KB aren't looked up:
+     empty and tiny files share fingerprints with unrelated files.
    - With optional free keys: VirusTotal (about 70 antivirus engines) and
      MalwareBazaar (a public collection of known malware).
    For these online lookups only the file's fingerprint (its SHA-256, a
@@ -117,6 +128,11 @@ Couldn't fully check
   "No known detections", because what it couldn't check might be the
   dangerous part. Warnings it did find still show (and Malicious or
   Suspicious still win).
+  Exception: for a program signed by a trusted publisher that capa had to
+  skip (too big or too slow), the card says "Signed by <publisher>, deep
+  check skipped" instead. Unsigned programs keep "Couldn't fully check".
+  An unsigned program padded with lots of empty filler is Suspicious on its
+  own (a trick to get past scanners' size limits).
 
 Couldn't check
   None of the checks could run.
@@ -288,11 +304,15 @@ FALSE-ALARM TEST
 
 Put about 100 files you trust (installers, programs, documents, PDFs,
 scripts, archives, and some game mods) in one folder. Drag that folder onto
-tools\False alarm test.bat (or double-click it and type the folder). It checks every file and prints how many got each
-answer, then lists the Malicious, Suspicious and Unusual ones with their
-reasons. Target: 0 Malicious and at most 5 Suspicious.
-A report is saved in %LOCALAPPDATA%\Blotter. With a VirusTotal key, 100
-files take about 25 minutes (4 lookups a minute). To skip the online
+tools\False alarm test.bat (or double-click it and type the folder). Close
+Blotter first: the test uses the PC fully. It checks one file at a time,
+prints how many got each answer, then lists every file that didn't get "No
+known detections", with its reasons. Target: 0 Malicious and at most 5
+Suspicious.
+The report is saved in %LOCALAPPDATA%\Blotter even if the run stops early
+(each result is also saved the moment it is known, in a .jsonl file next to
+it). Big programs take a minute or two each for capa; with a VirusTotal key,
+lookups add 15 seconds a file (4 a minute). To skip the online
 lookups, open a command window in the Blotter folder and run:
 
     .venv\Scripts\python tools\false_alarm_test.py "D:\My trusted files" --offline

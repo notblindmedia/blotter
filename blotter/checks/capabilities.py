@@ -8,10 +8,12 @@ and says each one in plain words, with what else does the same.
 import json
 import os
 import re
+import tempfile
+from pathlib import Path
 
 
 from .. import config, procs, worker
-from ..analyze import filetype
+from ..analyze import filetype, program
 from ..findings import (CLEAR, ERROR, SKIPPED, SUSPICIOUS, WEAK, Finding, detected, hiding, risky, unchecked,
                         weak)
 
@@ -19,7 +21,8 @@ ID = "capa"
 NAME = "Abilities (capa)"
 ORDER = 55
 TIMEOUT = 300
-CACHE = False
+CACHE = True          # capa is slow and gives the same answer for the same file and rules
+CACHE_VERSION = "capa-9.4.0-1"  # change when the rules, capa or the ability list change
 NEEDS_FILE = True
 
 CAPA_TIMEOUT = TIMEOUT - 15
@@ -100,28 +103,49 @@ def command(path) -> list[str]:
     args = ["-j", "-q", "--color", "never", "-r", str(config.CAPA_RULES), "--os", "auto"]
     if config.CAPA_SIGS.is_dir():
         args += ["-s", str(config.CAPA_SIGS)]
-    return worker.module_command("capa.main", args + [str(path)])
+    return worker.module_command("blotter.capa_fast", args + [str(path)])  # capa with vivisect's speed fix
 
 
 def scan(path) -> list[Finding]:
     ft = filetype.detect(path)
     if ft.real != "pe":
         return [Finding(ID, SKIPPED, "Not a Windows program, so capa had nothing to look at.")]
-    if os.path.getsize(path) > MAX_SIZE:
+    target, note = _without_overlay(path)
+    if os.path.getsize(target) > MAX_SIZE:
         return [unchecked(ID, f"The program is over {MAX_SIZE // 1024 ** 2} MB, which would take capa "
-                              "too long, so its abilities weren't checked; the other checks still looked at it.")]
+                              "too long, so its abilities weren't checked; the other checks still looked at it.",
+                          {"deep_check": True})]
     if not config.CAPA_RULES.is_dir():
         return [Finding(ID, ERROR, "capa's rules aren't downloaded yet (run Update rules in Settings).")]
-    code, out, err = procs.run(command(path), timeout=CAPA_TIMEOUT, memory_limit=config.WORKER_MEMORY)
+    code, out, err = procs.run(command(target), timeout=CAPA_TIMEOUT, memory_limit=config.WORKER_MEMORY)
     if code is None:
         return [unchecked(ID, f"capa needed more than {CAPA_TIMEOUT} seconds for this program, so Blotter "
-                                   "stopped it. Big programs can take that long.")]
+                              "stopped it. Programs with very many functions can take that long.",
+                          {"deep_check": True})]
     try:
         result = json.loads(out.decode("utf-8", "replace"))
     except ValueError:
         tail = err.decode("utf-8", "replace").strip().splitlines()[-1:] or [f"exit code {code}"]
         return [Finding(ID, ERROR, f"capa couldn't analyse this program ({tail[0][:160]}).")]
-    return interpret(result)
+    found = interpret(result)
+    return found + ([Finding(ID, CLEAR, note)] if note else [])
+
+
+def _without_overlay(path):
+    """capa only needs the program itself. Data appended after it (the "overlay": installer payloads,
+    signatures, or padding meant to push a file past scanners' size limits) is cut off first."""
+    info = program.overlay(path)
+    if not info or info["size"] < 1024 * 1024:
+        return path, None
+    folder = Path(os.environ.get("BLOTTER_WORK") or tempfile.mkdtemp())
+    trimmed = folder / "without-overlay.blotter"
+    with open(path, "rb") as src, open(trimmed, "wb") as out:
+        left = info["start"]
+        while left > 0 and (chunk := src.read(min(left, 1024 * 1024))):
+            out.write(chunk)
+            left -= len(chunk)
+    mb = info["size"] / 1024 ** 2
+    return trimmed, (f"capa looked at the program itself and skipped the {mb:.0f} MB of data appended after it.")
 
 
 def interpret(result: dict) -> list[Finding]:

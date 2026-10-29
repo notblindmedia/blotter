@@ -150,7 +150,7 @@ class HashlookupTests(unittest.TestCase):
 
 def samples_path():
     path = Path(tempfile.mkdtemp()) / "a.blotter"
-    path.write_bytes(b"some bytes")
+    path.write_bytes(b"some bytes " * 200)  # over 1 KB: CIRCL isn't asked about tinier files
     return path
 
 

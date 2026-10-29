@@ -92,11 +92,10 @@ class LimitTests(unittest.TestCase):
         v = decide([RAN, Finding("capa", "note", "too big", {}, [UNCHECKED])], trusted=True)
         self.assertEqual(v["verdict"], "couldnt_fully_check")
 
-    def test_padded_program_300_mb(self):
-        """A harmless program padded with zeros to 300 MB: too big for capa, so never 'No known detections'."""
-        data = samples.minimal_pe() + bytes(300 * 1024 * 1024 - len(samples.minimal_pe()))
-        job = full_scan(data, "setup.exe")
-        del data
+    def test_big_unsigned_program_is_not_fully_checked(self):
+        """A program whose real code is over capa's 25 MB limit (no padding, no signature): never 'No known
+        detections'. (Padding is handled separately: tests/test_trusted_files.py.)"""
+        job = full_scan(samples.pe_with_section(30 * 1024 * 1024), "bigtool.exe")
         self.assertEqual(job.verdict["verdict"], "couldnt_fully_check", job.verdict)
         self.assertEqual(job.verdict["title"], "Couldn't fully check")
         self.assertTrue(any("over 25 MB" in r for r in job.verdict["reasons"]), job.verdict["reasons"])
