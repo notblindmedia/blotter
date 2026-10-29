@@ -10,7 +10,6 @@ own header instead, as 7-Zip, WinRAR and tar do, so breaking it can't hide what 
 
 import mmap
 import os
-import shutil
 import struct
 import subprocess
 import uuid
@@ -18,7 +17,7 @@ import zipfile
 import zlib
 from pathlib import Path
 
-from .. import config
+from .. import cleanup, config
 
 CHUNK = 1024 * 1024
 WINDOWS_TAR = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
@@ -76,8 +75,8 @@ def _copy_limited(source, target: Path, budget: Budget, declared=None):
 
 
 def remove(folder) -> None:
-    """Delete one of Blotter's own work folders (made by workdir())."""
-    shutil.rmtree(folder, ignore_errors=True)
+    """Delete one of Blotter's own work folders (made by workdir()); cleanup.safe_remove refuses anything else."""
+    cleanup.safe_remove(folder)
 
 
 def walk(path, real, visit, budget: Budget, passwords=None):
@@ -93,7 +92,7 @@ def walk(path, real, visit, budget: Budget, passwords=None):
             return _rar(path, visit, budget, folder, passwords)
         raise ValueError(real)
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
+        remove(folder)
 
 
 def _zip(path, visit, budget, folder, passwords):
@@ -290,8 +289,9 @@ def _tar_member(archive, name, target, budget, declared, password):
     """Unpack one file with Windows' own tar.exe (libarchive); it reads AES-locked zips too."""
     if not WINDOWS_TAR.is_file():
         return False
+    # -O: to stdout, so tar never writes a file. "--": a name like "-C" or "--help" stays a name, not an option.
     command = [str(WINDOWS_TAR), "-x", "-O", *(["--passphrase", password] if password else []),
-               "-f", str(archive), name]
+               "-f", str(archive), "--", name]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:

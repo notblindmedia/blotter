@@ -423,6 +423,12 @@ WHERE THINGS ARE
   ...\clamav-db
 - Temporary copies and the sandbox's scratch folders:
   %LOCALAPPDATA%\Blotter\incoming (emptied after each check and at start-up).
+  Files unpacked from archives get neutral names (m0001.blotter) in a fresh
+  folder there, so a name like ..\evil.exe, C:\ or CON inside an archive
+  can't write anywhere else. Unpack folders are deleted by one function
+  (blotter\cleanup.py) that refuses anything outside "incoming" or the
+  sandbox's own work folder and removes links and junctions themselves,
+  never what they point to.
 - The sandbox's private Python: %LOCALAPPDATA%\Blotter\runtime. Blotter gives
   its sandbox read access to that folder, the Blotter folder and the rules
   folder (Windows permissions, recorded in sandbox-grants.txt). Nothing
