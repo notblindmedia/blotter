@@ -52,13 +52,18 @@ NEEDS_TOKEN_PAGE = """<!doctype html><meta charset="utf-8"><title>Blotter</title
 starts. Double-click <b>Start Blotter.bat</b> again; it opens this page with the right code.</p></body>"""
 
 
-def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
+def create_app(checks=None, cache=None, trust=None, token=None, test_mode=False) -> FastAPI:
+    """test_mode (--test-mode, for Claude's test runs): the Defender check is left out and every card says so."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = token or secrets.token_urlsafe(32)  # new every start; see __main__.py
     app.state.token = token
     trust = trust or TrustList(config.TRUST_PATH)
-    runner = Runner(cache or Cache(config.DB_PATH), checks if checks is not None else load_checks(), trust=trust)
+    checks = checks if checks is not None else load_checks()
+    if test_mode:
+        checks = [c for c in checks if c.ID != "defender"]
+    runner = Runner(cache or Cache(config.DB_PATH), checks, trust=trust, test_mode=test_mode)
     app.state.runner = runner  # __main__.py closes it (the deep-check queue) when Blotter closes
+    app.state.test_mode = test_mode
     hosts = {f"127.0.0.1:{config.PORT}", f"localhost:{config.PORT}"}
     origins = {f"http://{h}" for h in hosts}
     update_state = {"running": False, "lines": [], "at": None}
@@ -120,7 +125,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
 
     @app.get("/api/ping")
     def ping():
-        return {"app": "blotter", "version": __version__}
+        return {"app": "blotter", "version": __version__, "test_mode": test_mode}
 
     @app.get("/api/status")
     def status():
@@ -129,6 +134,7 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
         return {
             "keys": keys.status(),
             "restart_needed": code_changed(),
+            "test_mode": test_mode,
             "key_store_ok": keys.backend_ok(),
             "settings": settings.load(),
             "defender": str(scanner) if scanner else None,
@@ -212,7 +218,9 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
                     out.close()
                 except OSError as e:
                     blocked, save_error = _save_failed(e, out, path)
-        if blocked:
+        if blocked and test_mode:  # no Defender check to report it
+            save_error = "Windows refused to save the copy, probably Microsoft Defender (test mode: Defender check off)"
+        elif blocked:
             save_error = None  # Defender stopped the save: the Defender check reports that as a detection
         job = runner.start(path, name, size, digest.hexdigest(), save_error=save_error, force=force)
         return job.to_dict()
@@ -253,6 +261,11 @@ def create_app(checks=None, cache=None, trust=None, token=None) -> FastAPI:
         code, out, _ = procs.run([sys.executable, "-I", "-c", PICK], timeout=600)
         chosen = out.decode("utf-8", "replace").strip() if code == 0 else ""
         return {"path": str(Path(chosen)) if chosen else None}
+
+    @app.get("/api/jobs")
+    def recent():
+        """This session's checked files, newest first (memory only: gone when Blotter closes)."""
+        return {"jobs": runner.recent()}
 
     @app.get("/api/jobs/{job_id}")
     def job(job_id: str):

@@ -5,9 +5,12 @@ const $ = (id) => document.getElementById(id);
 // The per-start code Blotter put in the page; every request carries it.
 const API_HEADERS = { "X-Blotter-Token": document.querySelector('meta[name="blotter-token"]')?.content || "" };
 let lastScan = null;      // {file} or {path}: what "Check again" repeats
+const scansById = new Map();  // job id -> its lastScan, so a card opened from the list can be checked again
 let currentJob = null;
 let pollTimer = null;
+let recentTimer = null;
 let status = null;
+let testMode = false;     // Blotter started with --test-mode: no Defender check, and every card says so
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -61,6 +64,10 @@ const CLAMAV_WORDS = {
 
 function showStatus(s) {
   status = s;
+  testMode = !!s.test_mode;
+  $("card-test-mode").hidden = !testMode;
+  $("eicar").hidden = testMode;
+  $("eicar-off").hidden = !testMode;
   $("restart").hidden = !s.restart_needed;
   showKeyState(s.keys);
   $("clamav-on").checked = s.settings.clamav;
@@ -168,8 +175,10 @@ async function scanFile(file, force = false) {
       },
       body: file,
     });
+    scansById.set(job.id, lastScan);
     render(job);
     poll(job.id);
+    refreshRecent();
   } catch (error) {
     showProblem(file.name, error.message.includes("Failed to fetch")
       ? "The file couldn't be read. If you just downloaded it, Microsoft Defender may already have removed it."
@@ -182,8 +191,10 @@ async function scanPath(path, force = false) {
   showRunning(path);
   try {
     const job = await post("/api/scan-path", { path, force });
+    scansById.set(job.id, lastScan);
     render(job);
     poll(job.id);
+    refreshRecent();
   } catch (error) {
     showProblem(path, error.message);
   }
@@ -194,13 +205,65 @@ function poll(id) {
   pollTimer = setTimeout(async () => {
     try {
       const job = await api(`/api/jobs/${id}`);
+      if (currentJob?.id !== id) return;  // another card was opened meanwhile
       render(job);
       if (job.state !== "done") poll(id);
-      else refresh();  // also notices an update made while Blotter runs
+      else { refresh(); refreshRecent(); }  // refresh also notices an update made while Blotter runs
     } catch (error) {
       showProblem("", error.message);
     }
   }, 700);
+}
+
+/* ---------- this session's files ---------- */
+
+// The list comes from Blotter's memory, so it survives reloading the page and is gone when Blotter closes.
+async function refreshRecent() {
+  clearTimeout(recentTimer);
+  let jobs;
+  try {
+    ({ jobs } = await api("/api/jobs"));
+  } catch (_) {
+    recentTimer = setTimeout(refreshRecent, 5000);
+    return;
+  }
+  $("recent").hidden = !jobs.length;
+  $("recent-list").replaceChildren(...jobs.map(recentRow));
+  if (jobs.some((j) => j.state !== "done")) recentTimer = setTimeout(refreshRecent, 1500);
+}
+
+function recentRow(j) {
+  const button = el("button");
+  button.type = "button";
+  button.setAttribute("aria-current", String(currentJob?.id === j.id));
+  button.append(el("span", j.name, "recent-name"));
+  const state = el("span", null, "recent-state");
+  if (j.state === "running") state.append("Checking…");
+  else {
+    state.append(el("b", j.title));
+    if (j.state === "deep_check") {
+      state.append(j.deep_queue ? ` · deep check queued, ${ordinal(j.deep_queue)} in line` : " · deep check running…");
+    }
+  }
+  button.append(state);
+  button.addEventListener("click", () => openJob(j.id));
+  const li = el("li");
+  li.append(button);
+  return li;
+}
+
+async function openJob(id) {
+  try {
+    const job = await api(`/api/jobs/${id}`);
+    lastScan = scansById.get(id) || (job.source_path ? { path: job.source_path } : null);
+    render(job);
+    if (job.state !== "done") poll(id);
+    else clearTimeout(pollTimer);  // stop updating the card that was open before
+    $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+    refreshRecent();
+  } catch (error) {
+    showProblem("", error.message);
+  }
 }
 
 function showRunning(name) {
@@ -209,6 +272,7 @@ function showRunning(name) {
   $("result").hidden = false;
   $("card").className = "card running";
   $("card-file").textContent = name;
+  $("card-test-mode").hidden = !testMode;
   $("card-verdict").textContent = "Checking…";
   $("card-summary").textContent = "Reading the file and asking each check.";
   $("card-reasons").replaceChildren();
@@ -221,6 +285,7 @@ function showRunning(name) {
 function showProblem(name, text) {
   $("card").className = "card v-couldnt_check";
   $("card-file").textContent = name;
+  $("card-test-mode").hidden = !testMode;
   $("card-verdict").textContent = "Couldn't check";
   $("card-summary").textContent = text;
   $("card-reasons").replaceChildren();
@@ -235,6 +300,7 @@ function render(job) {
   // "deep_check": every check but the deep one (capa) has answered, so the card shows that answer now.
   const shown = done || job.state === "deep_check";
   $("card-file").textContent = `${job.name} · ${formatSize(job.size)}`;
+  $("card-test-mode").hidden = !(job.test_mode || testMode);
   $("card").className = shown ? `card v-${job.verdict.verdict}` : "card running";
   $("card-verdict").textContent = shown ? job.verdict.title : "Checking…";
   $("card-summary").textContent = shown ? job.verdict.summary : "Each check reports as soon as it finishes.";
@@ -269,8 +335,8 @@ function render(job) {
   $("d-where").textContent = job.source_path || "a copy (dropped on the page or chosen in the browser)";
   $("d-checks").replaceChildren(...job.checks.map(renderCheck));
   const anyCached = job.checks.some((c) => c.cached_at);
-  $("again").hidden = !(done && anyCached);
-  $("again-hint").hidden = !(done && anyCached);
+  $("again").hidden = !(done && anyCached && lastScan);
+  $("again-hint").hidden = !(done && anyCached && lastScan);
 }
 
 // One short line next to "Open on VirusTotal". Without a key it says "not checked", never "never seen".
@@ -423,6 +489,7 @@ function setup() {
   $("quarantine").addEventListener("click", quarantineFile);
   $("password-form").addEventListener("submit", tryPassword);
   $("eicar").addEventListener("click", () => {
+    if (testMode) return;  // the button is hidden then; EICAR on disk is for a full check with Defender
     // Built in memory from pieces, so this script itself never looks like the test file.
     const text = ["X5O!P%@AP[4\\PZX54(P^)7CC)7}$", "EICAR-STANDARD-", "ANTIVIRUS-TEST-FILE!$H+H*"].join("");
     scanFile(new File([text], "eicar.com"));
@@ -452,6 +519,7 @@ function setup() {
     if (!s.settings.setup_done) openSettings(true, true);
     if (!s.key_store_ok) $("keys-message").textContent = "Windows Credential Manager isn't available, so keys can't be saved.";
   }).catch(() => {});
+  refreshRecent();
 }
 
 setup();

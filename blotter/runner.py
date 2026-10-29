@@ -41,6 +41,7 @@ class Job:
         self.verdict = None
         self.trusted = None
         self.queue = None  # the runner's DeepQueue, for this job's place in line
+        self.test_mode = False
         self.thread = None  # the thread that runs the checks and then deletes the copy
         self.checks = {
             m.ID: {"id": m.ID, "name": m.NAME, "state": "waiting", "findings": [], "cached_at": None}
@@ -53,6 +54,7 @@ class Job:
             "state": self.state, "verdict": self.verdict, "trusted": self.trusted,
             "source_path": self.source_path, "needs_password": bool(self.retry_path),
             "deep_queue": self.queue.position(self) if self.queue else None,  # 1 = next in line
+            "test_mode": self.test_mode,
             "checks": [
                 {**c, "findings": [f.to_dict() for f in c["findings"]]} for c in self.checks.values()
             ],
@@ -65,8 +67,9 @@ def isolated(check) -> bool:
 
 
 class Runner:
-    def __init__(self, cache, checks, trust=None):
+    def __init__(self, cache, checks, trust=None, test_mode=False):
         self.cache = cache
+        self.test_mode = test_mode  # --test-mode: the Defender check is left out; cards say so
         self.trust = trust
         self.checks = list(checks)
         self.jobs: dict[str, Job] = {}
@@ -76,6 +79,7 @@ class Runner:
     def start(self, path, name, size, sha256, save_error=None, force=False, source_path=None, password=None) -> Job:
         job = Job(name, size, sha256, self.checks, source_path=source_path, password=password)
         job.queue = self.deep
+        job.test_mode = self.test_mode
         with self._lock:
             self.jobs[job.id] = job
             for old in list(self.jobs)[:-KEEP_JOBS]:
@@ -84,6 +88,14 @@ class Runner:
         job.thread = threading.Thread(target=self._run, args=(job, Path(path), save_error, force), daemon=True)
         job.thread.start()
         return job
+
+    def recent(self) -> list[dict]:
+        """One short line per checked file, newest first, for the page's list."""
+        with self._lock:
+            jobs = list(self.jobs.values())
+        return [{"id": j.id, "name": j.name, "state": j.state, "created": j.created,
+                 "verdict": (j.verdict or {}).get("verdict"), "title": (j.verdict or {}).get("title"),
+                 "deep_queue": j.queue.position(j) if j.queue else None} for j in reversed(jobs)]
 
     def get(self, job_id) -> Job | None:
         with self._lock:

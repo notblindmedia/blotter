@@ -25,11 +25,15 @@ def _saved_token() -> str:
 
 
 def _ping() -> str:
-    """'blotter' if Blotter already runs on the port, 'other' if something else does, '' if free."""
+    """'blotter' (or 'blotter-test-mode') if Blotter already runs on the port, 'other' if something else
+    does, '' if free. A Blotter that refuses the saved code counts as 'blotter': Defender on."""
     request = urllib.request.Request(f"{config.URL}/api/ping", headers={"X-Blotter-Token": _saved_token()})
     try:
         with urllib.request.urlopen(request, timeout=1) as r:
-            return "blotter" if json.load(r).get("app") == "blotter" else "other"
+            body = json.load(r)
+            if body.get("app") != "blotter":
+                return "other"
+            return "blotter-test-mode" if body.get("test_mode") else "blotter"
     except urllib.error.HTTPError as e:
         try:
             return "blotter" if json.load(e).get("app") == "blotter" else "other"
@@ -81,16 +85,23 @@ def _page() -> str:
 
 def _open_when_ready():
     for _ in range(50):
-        if _ping() == "blotter":
+        if _ping().startswith("blotter"):
             webbrowser.open(_page())
             return
         time.sleep(0.2)
 
 
 def main() -> int:
+    test_mode = "--test-mode" in sys.argv  # for Claude's test runs: no Defender check; every card says so
     state = _ping()
-    if state == "blotter":
+    if state == "blotter" and test_mode:
+        print("Blotter is already running with Defender on, so it can't switch to test mode. "
+              "Close its window, then start it again with --test-mode.")
+        return 1
+    if state.startswith("blotter"):
         print(f"Blotter is already running. Opening {config.URL}")
+        if state == "blotter-test-mode":
+            print("It is in test mode (Defender off). Close its window and start it again for a full check.")
         webbrowser.open(_page())
         return 0
     if state == "other":
@@ -113,7 +124,7 @@ def main() -> int:
     token = secrets.token_urlsafe(32)
     config.HOME.mkdir(parents=True, exist_ok=True)
     TOKEN_FILE.write_text(token, encoding="ascii")
-    app = create_app(token=token)
+    app = create_app(token=token, test_mode=test_mode)
     stop = _stopper(app)
     _on_close(stop)
     # Weekly YARA Forge refresh (skipped when the rules are less than a week old), and ClamAV while open.
@@ -122,6 +133,8 @@ def main() -> int:
     if "--no-browser" not in sys.argv:
         threading.Thread(target=_open_when_ready, daemon=True).start()
     print(f"Blotter is running at {config.URL}")
+    if test_mode:
+        print("Test mode: Defender off. Every card says so.")
     print("Keep this window open while you use it. Close it to stop Blotter.")
     try:
         uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")

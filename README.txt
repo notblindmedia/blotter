@@ -255,6 +255,11 @@ USING IT
      %LOCALAPPDATA%\Blotter\quarantine with a .blotted ending, so it can't be
      opened by a double-click. "Put back" under Settings restores it.
    - "Details" shows the fingerprint and what every check said.
+   Below the card, "Checked since Blotter started" lists every file of
+   this session, newest first, with its answer and its deep check ("deep
+   check queued, 2nd in line", "deep check running…"). It updates by
+   itself; click a file to open its card. The list lives only in
+   Blotter's memory: closing Blotter clears it.
 
 5. To stop Blotter, close the black window. ClamAV stops with it.
 
@@ -262,6 +267,13 @@ USING IT
    Blotter again. Double-clicking "Start Blotter.bat" while Blotter runs
    only reopens the page of the running, older Blotter. The page notices
    this and says "Blotter was updated while it was running".
+
+7. Test mode, for test runs (Claude's sessions always use it):
+   "Start Blotter.bat" --test-mode (or python -m blotter --test-mode).
+   The Microsoft Defender check is left out, every card says "Test mode:
+   Defender off", and the EICAR button is hidden. It refuses to start
+   while a normal Blotter runs (close that one first). For a full check,
+   close it and start Blotter normally.
 
 Quota: a free VirusTotal key allows 4 lookups a minute and 500 a day.
 Blotter waits for a free slot rather than going over. Online answers are
