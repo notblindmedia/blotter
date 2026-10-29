@@ -6,10 +6,14 @@ Suspicious           a warning sign on its own (a few antivirus engines, a broke
                      risky abilities PLUS hiding / a lying name / packed and unsigned / unknown everywhere
 Unusual              risky abilities only
 
-A valid signature from a trusted publisher (not on rules/stolen-certificates.txt) quiets the program's
-abilities (capa, program and script patterns): they stay listed but don't raise the answer. If capa
-had to skip such a program (too big, too slow), the card says "Signed by <publisher>, deep check
-skipped" instead of "Couldn't fully check". Engine detections are never quieted.
+A valid signature from a well-known publisher (rules/trusted-publishers.txt, not on
+rules/stolen-certificates.txt) quiets the program's abilities (capa, program and script patterns):
+they stay listed but don't raise the answer. If capa had to skip such a program (too big, too slow),
+the card says "Signed by <publisher>, deep check skipped" instead of "Couldn't fully check".
+Any other valid signature forgives one warning sign: risky abilities need two reasons (instead of one)
+to reach Suspicious, and weak signs count one step lower.
+Engine detections that name malware are never quieted. ClamAV's generic guesses (heuristics, PUA,
+packer names) are Suspicious at most, and Unusual for a well-known publisher's program.
 An unsigned program padded with lots of empty filler is Suspicious on its own.
 No known detections  checks ran and found nothing
 
@@ -95,6 +99,16 @@ def _deep_check_skipped(f, signed_by):
                    [s for s in f.signals if s != UNCHECKED])
 
 
+def _generic_clamav(f, signed_by):
+    """ClamAV's generic guess on a well-known publisher's program: a note that keeps the answer at Unusual."""
+    kind = f.details.get("generic")
+    if f.check != "clamav" or f.level != SUSPICIOUS or not kind or "" not in signed_by:
+        return f
+    what = "generic packer guess" if kind == "packer" else "generic guess"
+    return Finding(f.check, NOTE, f"ClamAV's {what}; the file is signed by {signed_by[''].rstrip('.')}.",
+                   {**f.details, "signed_generic": True}, list(f.signals))
+
+
 def _vt_words(f) -> str:
     """'1 VirusTotal engine flags it' / '2 VirusTotal engines flag it' / '... call it suspicious'."""
     mal, sus = int(f.details.get("malicious") or 0), int(f.details.get("suspicious") or 0)
@@ -116,7 +130,11 @@ def decide(findings, trusted=False) -> dict:
     # Programs signed by a trusted publisher (valid signature, not on the stolen-certificate list).
     signed_by = {f.details.get("scope", ""): f.details["trusted_publisher"] for f in findings
                  if f.details.get("trusted_publisher") and SIGNED in f.signals}
-    findings = [_deep_check_skipped(f, signed_by) for f in findings]
+    # Programs with any other valid signature: it counts for a little (forgives one warning sign).
+    mild = {f.details.get("scope", ""): f.details["signed_by"] for f in findings
+            if f.details.get("signed_by") and SIGNED in f.signals}
+    findings = [_generic_clamav(_deep_check_skipped(f, signed_by), signed_by) for f in findings]
+    generic_signed = [f for f in findings if f.details.get("signed_generic")]
     levels = {f.level for f in findings}
     everything = set().union(*(f.signals for f in findings)) if findings else set()
     unknown_everywhere = UNKNOWN_ONLINE in everything and KNOWN_GOOD not in everything
@@ -140,9 +158,15 @@ def decide(findings, trusted=False) -> dict:
                 reasons.append(_WHY[PACKED])
             if unknown_everywhere:
                 reasons.append(_WHY[UNKNOWN_ONLINE])
-            level = "suspicious" if reasons else "unusual"
+            level = "suspicious" if len(reasons) >= (2 if scope in mild else 1) else "unusual"
+            if scope in mild and level == "suspicious":
+                reasons.append(f"its signature ({mild[scope]}) doesn't outweigh that")
         elif _weak(signals, unknown_everywhere):
             level, reasons = _weak(signals, unknown_everywhere)
+            if scope in mild:
+                if level == "unusual":
+                    continue  # the signature outweighs one weak sign with one bit of context
+                level = "unusual"
             counted.add(scope)
         else:
             continue
@@ -150,6 +174,9 @@ def decide(findings, trusted=False) -> dict:
             heuristic, why = level, reasons
         elif level == heuristic:
             why += [r for r in reasons if r not in why]
+
+    if generic_signed and heuristic is None:
+        heuristic = "unusual"
 
     if MALICIOUS in levels:
         key = "malicious"
@@ -168,7 +195,7 @@ def decide(findings, trusted=False) -> dict:
         key = "couldnt_check"
 
     title, summary = VERDICTS[key]
-    notes = []
+    notes = [f.text for f in generic_signed]
     if quieted and key in ("no_known_detections", "unusual"):
         notes.append(f"It is signed by {quieted[0]}, a trusted publisher, so what it can do (listed below) "
                      "doesn't raise a warning.")
@@ -181,7 +208,7 @@ def decide(findings, trusted=False) -> dict:
     weak_vt = [f for f in findings if f.check == "virustotal" and f.level == SUSPICIOUS]
     weak_ids = {id(f) for f in weak_vt}
     flagged = any(f.level == MALICIOUS or (f.details.get("engine") and f.level == SUSPICIOUS and id(f) not in weak_ids)
-                  for f in findings)
+                  for f in findings) or bool(generic_signed)
     quiet_to = "couldnt_fully_check" if UNCHECKED in everything else "no_known_detections"
     if trusted and flagged:
         word = "detected" if key == "malicious" else "flagged"

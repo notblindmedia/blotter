@@ -7,6 +7,7 @@ pefile only reads the file's structure. The signature is checked by Windows itse
 import json
 import math
 import os
+import re
 
 from .. import config, procs
 from ..findings import CLEAR, NOTE, PACKED, PADDED, SIGNED, SUSPICIOUS, UNSIGNED, Finding, detected, risky, weak
@@ -87,26 +88,39 @@ def signature(path) -> dict:
             "issuer": _common_name(result.get("issuer") or "")}
 
 
-def stolen_certificates() -> dict:
-    """{serial or thumbprint (lower-case hex): note} from rules/stolen-certificates.txt."""
-    out = {}
+def _listed(name: str) -> list[tuple[str, str]]:
+    """(value, note) pairs from a list in rules/: one value per line, # starts a note."""
     try:
-        lines = (config.OWN_RULES / "stolen-certificates.txt").read_text(encoding="utf-8").splitlines()
+        lines = (config.OWN_RULES / name).read_text(encoding="utf-8").splitlines()
     except OSError:
-        return out
+        return []
+    out = []
     for line in lines:
         value, _, note = line.partition("#")
-        value = value.strip().replace(" ", "").replace(":", "").lower()
-        if value:
-            out[value] = note.strip()
+        if value.strip():
+            out.append((value.strip(), note.strip()))
     return out
 
 
+def stolen_certificates() -> dict:
+    """{serial or thumbprint (lower-case hex): note} from rules/stolen-certificates.txt (may be empty)."""
+    return {value.replace(" ", "").replace(":", "").lower(): note
+            for value, note in _listed("stolen-certificates.txt")}
+
+
+def well_known_publishers() -> set:
+    """Lower-case signer names from rules/trusted-publishers.txt."""
+    return {" ".join(value.split()).lower() for value, _ in _listed("trusted-publishers.txt")}
+
+
 def _common_name(subject: str) -> str:
-    for part in subject.split(","):
-        key, _, value = part.strip().partition("=")
-        if key == "CN":
-            return value.strip('"')
+    """The CN part of a certificate subject such as 'CN="Advanced Micro Devices, Inc.", O=...'."""
+    for m in re.finditer(r'(?:^|,)\s*([A-Za-z0-9.]+)=("(?:[^"]|"")*"|[^,]*)', subject):
+        if m.group(1).upper() == "CN":
+            value = m.group(2).strip()
+            if value.startswith('"') and value.endswith('"'):
+                value = value[1:-1].replace('""', '"')
+            return value
     return subject
 
 
@@ -199,9 +213,17 @@ def signature_findings(check, path, details=None) -> list[Finding]:
                 f"for malware ({hit or 'on Blotter list'}). Such a signature proves nothing.", details),
                 "Blotter", "stolen certificate")]
         how = " (through a Windows catalog)" if signed.get("kind") == "Catalog" else ""
-        details["trusted_publisher"] = signer or "a known publisher"
-        return [Finding(check, CLEAR, f"It is digitally signed by {signer or 'a known publisher'}{how}, "
-                                      "and Windows says the signature is valid.", details, [SIGNED])]
+        if signer and " ".join(signer.split()).lower() in well_known_publishers():
+            details["trusted_publisher"] = signer
+            return [Finding(check, CLEAR, f"It is digitally signed by {signer}{how}, and Windows says the "
+                                          "signature is valid. That publisher is on Blotter's list of "
+                                          "well-known publishers.", details, [SIGNED])]
+        # Any company can buy a code-signing certificate, so other signatures only count for a little.
+        details["signed_by"] = signer or "an unnamed publisher"
+        return [Finding(check, CLEAR, f"It is digitally signed by {signer or 'an unnamed publisher'}{how}, and "
+                                      "Windows says the signature is valid. That publisher isn't on Blotter's "
+                                      "short list of well-known publishers, so the signature counts for a "
+                                      "little, not a lot.", details, [SIGNED])]
     if status == "HashMismatch":
         return [Finding(check, SUSPICIOUS,
             "It carries a digital signature that no longer matches the file: it was changed after it was "

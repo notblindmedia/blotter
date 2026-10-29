@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 
-from .. import config, procs, worker
+from .. import capa_fast, config, procs, worker
 from ..analyze import filetype, program
 from ..findings import (CLEAR, ERROR, SKIPPED, SUSPICIOUS, WEAK, Finding, detected, hiding, risky, unchecked,
                         weak)
@@ -128,7 +128,13 @@ def scan(path) -> list[Finding]:
         tail = err.decode("utf-8", "replace").strip().splitlines()[-1:] or [f"exit code {code}"]
         return [Finding(ID, ERROR, f"capa couldn't analyse this program ({tail[0][:160]}).")]
     found = interpret(result)
-    return found + ([Finding(ID, CLEAR, note)] if note else [])
+    if note:
+        found.append(Finding(ID, CLEAR, note))
+    if capa_fast.WARNING.encode() in err:
+        found.append(Finding(ID, CLEAR, "capa ran without Blotter's speed fix because the installed vivisect "
+                                        f"isn't version {capa_fast.VIVISECT}, so it was slower. The results "
+                                        "are the same."))
+    return found
 
 
 def _without_overlay(path):

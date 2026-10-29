@@ -61,6 +61,43 @@ def _only_this_pc(text: str) -> bool:
     return bool(hosts) and hosts <= THIS_PC
 
 
+# What counts as code for "downloads and runs": comments are dropped, and so are lists of strings (a
+# blocklist like ['curl', 'wget', 'iwr'] names commands, it doesn't run them). Strings stay in place
+# otherwise, so a URL or a command inside a string still counts.
+_STRINGS = {
+    "js": r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`",
+    "ps1": r"'(?:''|[^'])*'|\"(?:`.|\"\"|[^\"`])*\"",
+    "vbs": r"\"(?:\"\"|[^\"\n])*\"",
+}
+_COMMENTS = {
+    "js": r"/\*.*?\*/|//[^\n]*",
+    "ps1": r"<#.*?#>|#[^\n]*",
+    "vbs": r"'[^\n]*|(?im:^[ \t]*rem\b[^\n]*)",
+    "bat": r"(?im:^[ \t]*@?(?:rem\b|::)[^\n]*)",
+}
+_LANGUAGE = {"js": "js", "jse": "js", "hta": "js", "wsf": "js", "wsh": "js", "ps1": "ps1", "psm1": "ps1",
+             "psd1": "ps1", "vbs": "vbs", "vbe": "vbs", "bat": "bat", "cmd": "bat"}
+_ITEM = r"(?:'[^'\n]*'|\"[^\"\n]*\")"
+STRING_LIST = re.compile(rf"(?:\[|@\(|\barray\s*\()\s*{_ITEM}(?:\s*,\s*{_ITEM})+\s*,?\s*[\])]|"
+                         rf"(?<==)\s*{_ITEM}(?:\s*,\s*{_ITEM}){{2,}}", re.I)
+# Code that builds commands out of text at run time: then a list of strings can be the real command.
+BUILDS_CODE = re.compile(r"invoke-expression|\biex\b|\beval\s*\(|\bexecute(?:global)?\s*[(\"]|new\s+function\s*\(|"
+                         r"scriptblock\]::create|\.invoke\s*\(|&\s*\(\s*\$|\.\s*\(\s*\$", re.I)
+
+
+def code_only(text: str, kind: str) -> str:
+    """The script without its comments, and without plain lists of strings unless it builds code from text."""
+    lang = _LANGUAGE.get(kind)
+    if not lang:
+        return text
+    strings, comments = _STRINGS.get(lang), _COMMENTS[lang]
+    pattern = re.compile(f"({strings})|{comments}" if strings else comments, re.S)
+    code = pattern.sub(lambda m: (m.group(1) if strings else None) or " ", text)
+    if not BUILDS_CODE.search(code):
+        code = STRING_LIST.sub(" ", code)
+    return code
+
+
 def decode(data: bytes) -> str:
     data = data[:MAX_TEXT]
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
@@ -74,7 +111,8 @@ def analyze_text(check, text, kind, scope=None, where="It") -> list[Finding]:
     """`kind` is the file ending (ps1, bat, ...) or 'lnk' for a shortcut's command line."""
     s = {"scope": scope} if scope else {}
     out = []
-    downloads, runs = bool(DOWNLOAD.search(text)) and not _only_this_pc(text), bool(EXECUTE.search(text))
+    code = code_only(text, kind)
+    downloads, runs = bool(DOWNLOAD.search(code)) and not _only_this_pc(code), bool(EXECUTE.search(code))
     if downloads and runs:
         out.append(risky(check, "download-run",
             f"{where} downloads something from the internet and runs it. Installers and setup scripts do that "

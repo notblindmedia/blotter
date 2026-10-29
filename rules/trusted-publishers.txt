@@ -1,0 +1,60 @@
+# Well-known publishers. A valid signature from one of these (and not on stolen-certificates.txt):
+#   - fully quiets warnings about what the program can do (capa, program and script patterns),
+#   - turns ClamAV's generic packer guesses into Unusual instead of Suspicious,
+#   - says "Signed by <publisher>, deep check skipped" when capa can't finish a big program.
+# Engine detections that name a malware family are never quieted.
+# Any other valid signature counts for less: it forgives one warning sign, no more.
+#
+# One name per line, exactly as Windows shows the signer (the certificate's CN, as on the card:
+# "It is digitally signed by ..."). Upper/lower case doesn't matter. # starts a note.
+# Blotter reads this file on every check, so edits apply right away.
+#
+# "seen" = this exact spelling was read from real signed files on Inkwell (2026-10-29).
+# The others are the usual spellings, not yet seen on a real file here: if a program from that
+# company still shows as "not on the list", copy the name from its card into this file.
+
+# Microsoft. Not "Microsoft Windows Hardware/Software Compatibility Publisher": those sign other
+# companies' drivers and compatibility fixes after Microsoft's tests, so they stay ordinary signatures.
+Microsoft Windows                # seen (System32, through Windows catalogs)
+Microsoft Corporation            # seen
+Microsoft Windows Publisher
+
+# Google
+Google LLC                       # seen
+
+# Apple
+Apple Inc.
+
+# Valve
+Valve Corp.                      # seen
+Valve Corporation
+
+# Mozilla
+Mozilla Corporation
+
+# NVIDIA
+NVIDIA Corporation               # seen
+
+# AMD
+Advanced Micro Devices, Inc.
+Advanced Micro Devices Inc.
+
+# Intel
+Intel Corporation
+
+# Adobe
+Adobe Inc.
+Adobe Systems Incorporated
+
+# Oracle
+Oracle America, Inc.
+Oracle Corporation
+
+# Discord
+Discord Inc.                     # seen
+
+# Python Software Foundation
+Python Software Foundation       # seen
+
+# Git for Windows: its releases are signed by its maintainer
+Johannes Schindelin              # seen (Git for Windows installer and git.exe)

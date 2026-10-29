@@ -1,5 +1,6 @@
 """ClamAV scan of the file (sent as bytes to Blotter's own ClamAV on this PC; nothing leaves the PC)."""
 
+import re
 import time
 
 from .. import clamav, settings
@@ -14,6 +15,12 @@ NEEDS_FILE = True
 SANDBOX = False        # only streams the bytes to Blotter's ClamAV (on 127.0.0.1, which a sandbox can't reach)
 
 WAIT_FOR_READY = 90
+# ClamAV names that are guesses about how a file is built, not a known malware family: its heuristics,
+# "potentially unwanted" tools, and packer/generic names (e.g. Win.Packed.Mikey-9859574-0). These are weak
+# engine signals: Suspicious at most, and Unusual for a program from a well-known publisher (verdict.py).
+# Every other name (Win.Trojan.AgentTesla-..., Win.Ransomware.Lockbit-...) stays Malicious.
+GENERIC = re.compile(r"^(?:Heuristics|PUA)\.|^\w+\.(?:Packed|Packer|Packers)\.|\.(?:Generic|Heuristic|Heur)(?![a-z])", re.I)
+PACKER = re.compile(r"^\w+\.(?:Packed|Packer|Packers)\.", re.I)
 
 
 def scan(path) -> list[Finding]:
@@ -54,7 +61,13 @@ def interpret(answer: str, version: str = "") -> list[Finding]:
         if name.startswith("Heuristics.Limits.Exceeded"):
             return [unchecked(ID, f"The file is over one of ClamAV's size limits ({name}), so ClamAV didn't scan "
                                   "all of it.", details)]
-        if name.startswith(("Heuristics.", "PUA.")):
+        if PACKER.search(name):
+            details["generic"] = "packer"
+            return [detected(Finding(ID, SUSPICIOUS, f"ClamAV makes a generic packer guess about it ({name}): it "
+                                                     "is built the way packed malware often is. That is a warning "
+                                                     "sign, not a match with known malware.", details), "ClamAV", name)]
+        if GENERIC.search(name):
+            details["generic"] = "generic"
             return [detected(Finding(ID, SUSPICIOUS, f"ClamAV's broader rules flag it ({name}). That is a warning "
                                                      "sign rather than a known-malware match.", details), "ClamAV", name)]
         return [detected(Finding(ID, MALICIOUS, f"ClamAV recognises it as malware: {name}.", details), "ClamAV", name)]

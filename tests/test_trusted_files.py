@@ -126,10 +126,21 @@ class CatalogSignatureTests(unittest.TestCase):
         self.assertNotIn("trusted_publisher", flagged.details)
         self.assertIn("stolen", flagged.text)
 
-    def test_stolen_list_file_reads(self):
-        entries = program.stolen_certificates()
-        self.assertTrue(entries)
-        self.assertTrue(all(k == k.lower() and " " not in k for k in entries))
+    def test_stolen_list_ships_empty_and_an_empty_list_works(self):
+        """Security data never comes from memory: the list waits for the intel pack (abuse.ch)."""
+        self.assertEqual(program.stolen_certificates(), {})
+        copy = Path(tempfile.mkdtemp()) / "copy.blotter"
+        shutil.copyfile(SYSTEM32 / "certutil.exe", copy)
+        [found] = signature_check.scan(copy)
+        self.assertEqual(found.details.get("trusted_publisher"), "Microsoft Windows")
+
+    def test_stolen_list_format(self):
+        rules = Path(tempfile.mkdtemp())
+        (rules / "stolen-certificates.txt").write_text("# note only\n\n43:BB 43  # example\n", encoding="utf-8")
+        with mock.patch.object(config, "OWN_RULES", rules):
+            self.assertEqual(program.stolen_certificates(), {"43bb43": "example"})
+        with mock.patch.object(config, "OWN_RULES", Path(tempfile.mkdtemp())):
+            self.assertEqual(program.stolen_certificates(), {}, "a missing file is an empty list")
 
 
 # ---- 3. a trusted publisher's signature quiets abilities, never detections ----
@@ -215,9 +226,13 @@ class DeepCheckSkippedTests(unittest.TestCase):
     TOO_BIG = Finding("capa", NOTE, "The program is over 25 MB ...", {"deep_check": True}, [UNCHECKED])
 
     def test_signed_says_deep_check_skipped(self):
-        v = decide([RAN, signed("OpenJS Foundation"), self.TOO_BIG])
+        v = decide([RAN, signed("Python Software Foundation"), self.TOO_BIG])
         self.assertEqual(v["verdict"], "no_known_detections")
-        self.assertIn("Signed by OpenJS Foundation, deep check skipped.", v["reasons"])
+        self.assertIn("Signed by Python Software Foundation, deep check skipped.", v["reasons"])
+
+    def test_other_valid_signatures_keep_couldnt_fully_check(self):
+        other = Finding("signature", CLEAR, "Signed by OpenJS Foundation.", {"signed_by": "OpenJS Foundation"}, [SIGNED])
+        self.assertEqual(decide([RAN, other, self.TOO_BIG])["verdict"], "couldnt_fully_check")
 
     def test_unsigned_keeps_couldnt_fully_check(self):
         unsigned = Finding("signature", NOTE, "It isn't digitally signed.", {}, [UNSIGNED])

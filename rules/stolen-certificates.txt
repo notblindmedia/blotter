@@ -1,11 +1,11 @@
-# Code-signing certificates known to be stolen and used to sign malware.
-# A program signed with one of these is never treated as "signed by a trusted publisher".
+# Code-signing certificates known to be stolen or abused to sign malware.
+# A program signed with one of these is never treated as signed by a trusted publisher; the card
+# warns instead.
 #
-# One per line: the certificate's serial number or its SHA-1 thumbprint (hex; spaces and colons are
-# ignored), then # and a note. Blotter reads this file on every check, so edits apply right away.
+# Empty on purpose. Security data may never come from memory: this list will be filled by the
+# weekly intel pack from abuse.ch's code-signing certificate blocklist (phase 3), with the source
+# of every entry. Until then nothing is listed, and every valid signature is judged by
+# trusted-publishers.txt alone.
 #
-# Starter list, written from memory of public reports. Please check each entry against the source
-# before relying on it, and add new ones as they are published.
-
-43BB437D609866286DD839E1D00309F5  # NVIDIA Corporation, leaked in the March 2022 NVIDIA breach (expired 2014)
-14781BC862E8DC503A559346F5DCC518  # NVIDIA Corporation, leaked in the March 2022 NVIDIA breach (expired 2018)
+# Format (for the intel pack or a manual entry with a source): one certificate per line, its serial
+# number or SHA-1 thumbprint (hex; spaces and colons are ignored), then # and a note.

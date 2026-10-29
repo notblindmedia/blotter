@@ -58,17 +58,28 @@ the sandbox.
      abilities, such as "injects code into other programs" or "starts itself
      with Windows". It looks at the program itself, without data appended
      after it (installer payloads or padding). Its answers are remembered, so
-     checking the same program again is instant.
+     checking the same program again is instant. Blotter runs capa with a
+     speed fix for vivisect (the disassembler capa uses), made for vivisect
+     1.3.2 only; with any other version capa runs without it (slower, same
+     results) and the card says so.
    - Program check: is it digitally signed, by whom, and is the signature
      still valid? Windows also checks its catalog files, so its own programs
      (System32) count as signed by Microsoft even as copies. Is it packed
      (its code hidden until it runs)? Is it padded with empty filler to look
      bigger than it is? Does it use risky combinations of Windows functions?
-   - A valid signature from a trusted publisher quiets the warnings about
+   - A valid signature from a well-known publisher quiets the warnings about
      what a program can do (Microsoft's own tools can do a lot). Those
-     abilities stay listed on the card but don't raise the answer. Engine
-     detections are never quieted, and a certificate on the stolen list
-     (rules\stolen-certificates.txt) counts as a warning, not as trust.
+     abilities stay listed on the card but don't raise the answer. The list
+     is short and you can edit it: rules\trusted-publishers.txt (Microsoft,
+     Google, Apple, Valve, Mozilla, NVIDIA, AMD, Intel, Adobe, Oracle,
+     Discord, Python, Git for Windows). Any other valid signature counts for
+     a little: it forgives one warning sign, no more, because any company
+     can buy a signing certificate. Engine detections that name malware are
+     never quieted, and a certificate on the stolen list
+     (rules\stolen-certificates.txt) counts as a warning, not as trust. That
+     list starts empty: it will be filled from abuse.ch's blocklist of
+     abused code-signing certificates by the weekly update (planned), never
+     from memory.
    - Office documents: macros (with oletools), auto-run macros, scrambled
      macro code, documents that fetch content from the internet.
    - PDFs: JavaScript, actions that run by themselves when the PDF opens,
@@ -77,11 +88,18 @@ the sandbox.
    - Scripts and shortcuts (.ps1 .bat .cmd .vbs .js .hta .wsf .lnk ...):
      download-and-run lines, hidden windows, encoded commands, scrambled
      code, attempts to switch off Microsoft Defender. Web requests that only
-     go to this PC itself (127.0.0.1, localhost) don't count as downloads.
+     go to this PC itself (127.0.0.1, localhost) don't count as downloads,
+     and neither do download commands that only appear in comments or in a
+     list of names (a blocklist such as ['curl', 'wget', 'iwr']). If the
+     script builds commands out of text (iex, eval), such a list counts.
 
 3. Who knows it
    - ClamAV (an open-source antivirus) and Microsoft Defender scan it here on
-     your PC.
+     your PC. ClamAV's generic guesses (names starting with Heuristics. or
+     PUA., packer names like Win.Packed.*, and .Generic names) are a warning
+     sign, not a detection: Suspicious at most, and Unusual for a program
+     signed by a well-known publisher ("ClamAV's generic packer guess; the
+     file is signed by ..."). Names of real malware families stay Malicious.
    - CIRCL hashlookup (no account needed) says whether it is known, common
      software. That lowers suspicion. Files under 1 KB aren't looked up:
      empty and tiny files share fingerprints with unrelated files.
@@ -110,7 +128,8 @@ Suspicious
     "VirusTotal: not checked (no key)"); or
   - a program or script dressed up as another kind of file; or
   - a warning on its own: 1 or 2 VirusTotal engines, a broken signature, an
-    auto-run macro that can run programs, a broad malware rule.
+    auto-run macro that can run programs, a broad malware rule, a ClamAV
+    generic guess.
 
 Unusual
   It can do risky things, but nothing hides it and nothing recognises it.
@@ -128,9 +147,10 @@ Couldn't fully check
   "No known detections", because what it couldn't check might be the
   dangerous part. Warnings it did find still show (and Malicious or
   Suspicious still win).
-  Exception: for a program signed by a trusted publisher that capa had to
+  Exception: for a program signed by a well-known publisher that capa had to
   skip (too big or too slow), the card says "Signed by <publisher>, deep
-  check skipped" instead. Unsigned programs keep "Couldn't fully check".
+  check skipped" instead. Unsigned programs, and programs signed by anyone
+  else, keep "Couldn't fully check".
   An unsigned program padded with lots of empty filler is Suspicious on its
   own (a trick to get past scanners' size limits).
 
