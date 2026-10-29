@@ -1,5 +1,8 @@
 """Layer 0: look inside zip, rar and 7z archives, and run the file checks on every file in them.
 
+Zips hidden in other files count too: a zip glued after a picture or PDF, two zips back to back, a zip
+appended after a program (self-extracting installers do that), or one whose start was overwritten.
+
 Each file inside gets the type/disguise check, YARA, and the program, macro, PDF or script check
 that fits it. capa and the online lookups only look at the archive itself (capa would take too long
 for every file, and lookups for each file would use up the VirusTotal quota).
@@ -12,7 +15,7 @@ from ..analyze import archives, filetype, office, program, scripts, yararules
 from . import filetype as filetype_check
 from . import pdf as pdf_check
 from . import scripts as scripts_check
-from ..findings import CLEAR, ERROR, NOTE, SKIPPED, UNCHECKED, Finding
+from ..findings import CLEAR, ERROR, HIDING, NOTE, SKIPPED, UNCHECKED, Finding
 
 ID = "archive"
 NAME = "Archive contents"
@@ -22,6 +25,7 @@ CACHE = False
 NEEDS_FILE = True
 
 ARCHIVES = {"zip", "rar", "7z"}
+ZIP_BASED = {"zip", "ooxml", "odf", "jar"}  # formats that are a zip themselves (a .docx is one)
 MAX_SIGNATURES = 10  # Windows signature checks are slow-ish; programs beyond this are still checked otherwise
 
 
@@ -34,6 +38,7 @@ class Sweep:
         self.locked: list[str] = []
         self.too_big: list[str] = []
         self.damaged: list[str] = []   # files inside that couldn't be read whole, or archives cut off
+        self.hidden: list[tuple] = []  # (where, its file type, byte offset) of zips hidden in other files
         self.repaired: list[str] = []  # archives with a broken table of contents, read whole from file headers
         self.signatures = MAX_SIGNATURES
         self.rules = None
@@ -57,6 +62,43 @@ class Sweep:
             self.locked.append(prefix.rstrip("/") or "the archive")
         except archives.Bomb as e:
             self.too_big.append(f"{prefix.rstrip('/') or 'the archive'}: {e}")
+
+    def contents(self, path, ft, prefix, depth) -> bool:
+        """Unpack whatever archive data the file holds; False when there is none."""
+        if ft.real in ("rar", "7z"):
+            self.archive(path, ft.real, prefix, depth)
+            return True
+        after = 0
+        if ft.real == "pe":  # a program's own code and resources aren't archives; data appended after it can be
+            info = program.overlay(path)
+            if not info:
+                return False
+            after = info["start"]
+        # After a program only whole zips count: installers keep pieces of zips (wheels, packages) inside their
+        # own data, and a self-extracting installer's zip is always complete (seen: the Python installer).
+        segments = archives.zip_segments(path, after, headers_only=ft.real != "pe")
+        if ft.real == "zip" and (not segments or segments == [(0, segments[0][1])]):
+            self.archive(path, "zip", prefix, depth)  # an ordinary zip (or one too broken to place)
+            return True
+        found = False
+        for start, end in segments:
+            if start == 0 and ft.real in ZIP_BASED and ft.real != "zip":
+                continue  # a .docx or .jar is a zip itself, and its own checks read it
+            if start == 0 and ft.real in ("zip", "unknown"):
+                self._segment(path, start, end, prefix, depth)  # the file's own zip (its start may be overwritten)
+            else:
+                at = archives.first_file(path, start, end) if start == 0 else start
+                self.hidden.append((prefix.rstrip("/"), ft, at))
+                self._segment(path, start, end, f"{prefix}zip hidden at byte {at}/", depth)
+            found = True
+        return found
+
+    def _segment(self, path, start, end, prefix, depth):
+        folder = archives.workdir()
+        try:
+            self.archive(archives.cut(path, start, end, folder), "zip", prefix, depth)
+        finally:
+            archives.remove(folder)
 
     def member(self, name, path, depth):
         self.checked += 1
@@ -89,13 +131,13 @@ class Sweep:
         if self.rules is not None:
             try:
                 found += yararules.scan_target(self.rules, ID, path=path, scope=name)
-            except Exception:
-                pass
-        if ft.real in ARCHIVES:
-            if depth >= config.ARCHIVE_MAX_DEPTH:
+            except Exception as e:  # fails closed (verdict.py): this file wasn't fully checked
+                found.append(Finding(ID, ERROR, f"YARA couldn't scan it ({type(e).__name__}).", {"scope": name}))
+        if depth >= config.ARCHIVE_MAX_DEPTH:
+            if ft.real in ARCHIVES or (ft.real != "pe" and archives.zip_segments(path)):
                 self.too_big.append(f"{name}: archives are nested more than {config.ARCHIVE_MAX_DEPTH} deep")
-            else:
-                self.archive(path, ft.real, name + "/", depth + 1)
+        else:
+            self.contents(path, ft, name + "/", depth + 1)
         for f in found:
             f.check = ID
             if f.level == CLEAR and not f.signals:
@@ -106,11 +148,11 @@ class Sweep:
 
 def scan(path) -> list[Finding]:
     ft = filetype.detect(path)
-    if ft.real not in ARCHIVES:
-        return [Finding(ID, SKIPPED, "Not a zip, rar or 7z archive, so there was nothing to unpack.")]
     sweep = Sweep(hashing.password(path))
     try:
-        sweep.archive(path, ft.real, "", 1)
+        if not sweep.contents(path, ft, "", 1):
+            return [Finding(ID, SKIPPED, "Not a zip, rar or 7z archive, and no zip is hidden in it, so there was "
+                                         "nothing to unpack.")]
     except Exception as e:  # a damaged archive is a finding, not a crash
         return [Finding(ID, ERROR, f"Blotter couldn't unpack this archive ({type(e).__name__}).",
                         {"error": str(e)[:200]})]
@@ -119,6 +161,18 @@ def scan(path) -> list[Finding]:
 
 def summarize(sweep) -> list[Finding]:
     out = list(sweep.findings)
+    for where, ft, start in sweep.hidden:
+        it = f"Inside the archive, {where}" if where else "It"
+        if ft.real == "pe":
+            out.append(Finding(ID, NOTE, f"{it} carries a zip archive after the program (from byte {start:,}). "
+                                         "Self-extracting installers do that; Blotter unpacked it and checked the "
+                                         "files inside.", {"hidden_zip": start, "scope": where}))
+        else:
+            what = "another zip" if ft.real == "zip" else ft.label
+            out.append(Finding(ID, NOTE, f"{it} has a zip archive hidden after {what} (from byte {start:,}), a "
+                                         "trick to slip files past checks that only look at the start of a file. "
+                                         "Blotter unpacked it and checked the files inside.",
+                               {"hidden_zip": start, "scope": where, "ability": "hidden-zip"}, [HIDING]))
     if sweep.damaged:
         shown = ", ".join(sweep.damaged[:5]) + (" …" if len(sweep.damaged) > 5 else "")
         out.append(Finding(ID, NOTE, f"Part of the archive is damaged, so Blotter couldn't read all of it ({shown}). "

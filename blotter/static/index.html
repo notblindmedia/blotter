@@ -154,7 +154,7 @@
     <ol>
       <li><b>What it really is.</b> Blotter reads the first bytes to find the real file type and spots names that lie
         (such as invoice.pdf.exe). Zip, rar and 7z archives are unpacked and every file inside is checked, even
-        from a zip whose table of contents is broken.</li>
+        from a zip whose table of contents is broken or a zip hidden after a picture or PDF.</li>
       <li><b>What it can do.</b> YARA rules, capa (for programs), the program's signature and packing, Office macros,
         objects embedded in RTF files, PDF actions and JavaScript, and script tricks. Nothing is ever opened or run.</li>
       <li><b>Who knows it.</b> ClamAV and Microsoft Defender scan it here. CIRCL hashlookup, and with keys VirusTotal
@@ -168,7 +168,8 @@
         hides or recognises it.</dd>
       <dt>No known detections</dt><dd>Nothing recognised it. That is not a promise the file is harmless.</dd>
       <dt>Couldn't fully check</dt><dd>Part of the file was too big, nested too deep, took too long, is locked
-        with a password, or a check made for its kind of file couldn't read it (a damaged archive or document).
+        with a password, a check made for its kind of file couldn't read it (a damaged archive or document),
+        YARA failed, or no antivirus engine could scan it.
         Blotter never says "No known detections" then.</dd>
       <dt>Couldn't check</dt><dd>None of the checks could run.</dd>
     </dl>

@@ -54,6 +54,11 @@ the sandbox.
      and tar do, so breaking a zip can't hide a program from it. If files
      inside are damaged or the zip is cut off, the answer is "Couldn't fully
      check" (whatever could be read is still checked).
+     Zips hidden in other files are found and checked too: a zip glued after
+     a picture or a PDF, two zips back to back, a zip whose first bytes were
+     overwritten, and a zip appended after a program (self-extracting
+     installers do that; the card says so without counting it as a warning).
+     Zips a program keeps inside its own code and resources are left alone.
 
 2. What it can do
    - YARA rules: the YARA Forge "core" collection (about 5,000 rules for known
@@ -181,7 +186,11 @@ Couldn't fully check
   too long (capa: 15 minutes) or ran out of memory, or a locked archive.
   Or a check made for this kind of file failed on it: an archive that can't
   be unpacked, capa that couldn't analyse a program, an Office, RTF or PDF
-  file that couldn't be read. The card names the check and its error.
+  file that couldn't be read. The same when YARA failed, or when no
+  antivirus engine could scan the file (Defender and ClamAV both failed, or
+  ClamAV failed in test mode, where Defender isn't used). One engine failing
+  while the other scans, or an online lookup failing, stays a note. The card
+  names the check and its error.
   Blotter then never says "No known detections", because what it couldn't
   check might be the dangerous part. Warnings it did find still show (and
   Malicious or Suspicious still win).

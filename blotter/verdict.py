@@ -23,8 +23,10 @@ their own. Together with context they count:
   weak + one of (unsigned, packed, VirusTotal never saw it)          -> Unusual
   weak + two of those, or one of those + hiding or a lying name      -> Suspicious
 Couldn't check       nothing could run
-Couldn't fully check part of the file was over a size, depth or time limit, or a check made for its kind of
-                     file (unpacking, capa, Office, RTF, PDF, program, script, signature) failed on it.
+Couldn't fully check part of the file was over a size, depth or time limit, a check made for its kind of
+                     file (unpacking, capa, Office, RTF, PDF, program, script, signature) or YARA failed on
+                     it, or no antivirus engine could scan it (Defender and ClamAV both failed; in test mode
+                     ClamAV alone).
                      Never "No known detections"; only Malicious or Suspicious from another check outranks it.
 
 Known-good software (CIRCL hashlookup) lowers a Suspicious or Unusual that came only from
@@ -70,10 +72,13 @@ VERDICTS = {
 }
 
 STEPS = ["no_known_detections", "unusual", "suspicious"]
-# Checks made for one kind of file. If one of them fails on a file it applies to, part of the file wasn't
-# read, so the answer can't be "No known detections" (fail closed). Engines that look at every file
-# (Defender, ClamAV, YARA) and the online lookups keep their errors as plain notes.
-FILE_READERS = {"archive", "capa", "macros", "rtf", "pdf", "program", "scripts", "signature"}
+# Checks made for one kind of file, and YARA. If one of them fails on a file it applies to, part of the file
+# wasn't read, so the answer can't be "No known detections" (fail closed).
+FILE_READERS = {"archive", "capa", "macros", "rtf", "pdf", "program", "scripts", "signature", "yara"}
+# The antivirus engines fail closed together: when every one that tried failed and none scanned the file
+# (in test mode, without Defender, that is ClamAV alone). One failing while another scans stays a note,
+# and so do the online lookups.
+AV_ENGINES = {"defender", "clamav"}
 _ORDER = {MALICIOUS: 0, SUSPICIOUS: 1, NOTE: 2, CLEAR: 3, UNKNOWN: 4, ERROR: 5, SKIPPED: 6}
 _WHY = {
     HIDING: "it also hides what it is or does",
@@ -95,11 +100,19 @@ def _weak(signals, unknown_everywhere):
     return level, ["signs that are common on their own add up: " + ", ".join(words)]
 
 
-def _fail_closed(f):
-    """A file reader that errored didn't finish reading the file: count it like a limit."""
-    if f.level != ERROR or f.check not in FILE_READERS or UNCHECKED in f.signals:
+def _fail_closed(f, no_av=False):
+    """A file reader that errored didn't finish reading the file: count it like a limit. So does an antivirus
+    engine's error when no engine scanned the file (no_av)."""
+    if f.level != ERROR or UNCHECKED in f.signals or not (f.check in FILE_READERS or no_av and f.check in AV_ENGINES):
         return f
     return Finding(f.check, f.level, f.text, dict(f.details), [*f.signals, UNCHECKED])
+
+
+def _no_av_scanned(findings) -> bool:
+    """True when an antivirus engine tried and failed, and none scanned the file."""
+    tried = {f.check for f in findings if f.check in AV_ENGINES and f.level != SKIPPED}
+    scanned = {f.check for f in findings if f.check in AV_ENGINES and f.level not in (ERROR, SKIPPED)}
+    return bool(tried) and not scanned
 
 
 def _deep_check_skipped(f, signed_by):
@@ -146,7 +159,8 @@ def decide(findings, trusted=False) -> dict:
     # Programs with any other valid signature: it counts for a little (forgives one warning sign).
     mild = {f.details.get("scope", ""): f.details["signed_by"] for f in findings
             if f.details.get("signed_by") and SIGNED in f.signals}
-    findings = [_generic_clamav(_deep_check_skipped(_fail_closed(f), signed_by), signed_by) for f in findings]
+    no_av = _no_av_scanned(findings)
+    findings = [_generic_clamav(_deep_check_skipped(_fail_closed(f, no_av), signed_by), signed_by) for f in findings]
     generic_signed = [f for f in findings if f.details.get("signed_generic")]
     levels = {f.level for f in findings}
     everything = set().union(*(f.signals for f in findings)) if findings else set()

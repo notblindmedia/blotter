@@ -114,10 +114,46 @@ class FailClosedTests(unittest.TestCase):
         failed = Finding("capa", ERROR, "capa couldn't analyse this program (MemoryError).")
         self.assertEqual(decide([clear(), failed], trusted=True)["verdict"], "couldnt_fully_check")
 
-    def test_engines_and_online_lookups_keep_their_errors_as_notes(self):
-        for check in ("virustotal", "malwarebazaar", "hashlookup", "clamav", "yara", "defender"):
+    def test_online_lookups_keep_their_errors_as_notes(self):
+        for check in ("virustotal", "malwarebazaar", "hashlookup"):
             v = decide([clear(), Finding(check, ERROR, "Couldn't be reached.")])
             self.assertEqual(v["verdict"], "no_known_detections", check)
+
+    def test_one_antivirus_engine_failing_while_the_other_scans_stays_a_note(self):
+        scanned = {"defender": Finding("defender", CLEAR, "Defender found nothing."),
+                   "clamav": Finding("clamav", CLEAR, "ClamAV found nothing.")}
+        for failed, other in (("defender", "clamav"), ("clamav", "defender")):
+            v = decide([clear(), Finding(failed, ERROR, "It couldn't scan it."), scanned[other]])
+            self.assertEqual(v["verdict"], "no_known_detections", failed)
+
+    def test_both_antivirus_engines_failing_is_couldnt_fully_check(self):
+        v = decide([clear(), Finding("defender", ERROR, "Defender couldn't scan the file."),
+                    Finding("clamav", ERROR, "ClamAV wasn't ready (it isn't running).")])
+        self.assertEqual(v["verdict"], "couldnt_fully_check")
+        self.assertIn("ClamAV wasn't ready (it isn't running).", v["reasons"][:2])
+
+    def test_in_test_mode_clamav_failing_alone_is_couldnt_fully_check(self):
+        # --test-mode leaves the Defender check out, so ClamAV is the only engine.
+        v = decide([clear(), Finding("clamav", ERROR, "ClamAV wasn't ready (it isn't running).")])
+        self.assertEqual(v["verdict"], "couldnt_fully_check")
+
+    def test_clamav_turned_off_and_defender_failing_means_no_engine_scanned(self):
+        v = decide([clear(), Finding("clamav", "skipped", "ClamAV is turned off in Settings."),
+                    Finding("defender", ERROR, "Defender couldn't scan the file.")])
+        self.assertEqual(v["verdict"], "couldnt_fully_check")
+        off = decide([clear(), Finding("clamav", "skipped", "ClamAV is turned off in Settings.")])
+        self.assertEqual(off["verdict"], "no_known_detections")  # nothing failed: switched off, as before
+
+    def test_yara_failing_is_couldnt_fully_check(self):
+        v = decide([clear(), Finding("yara", ERROR, "No YARA rules are installed yet (run Update rules in Settings).")])
+        self.assertEqual(v["verdict"], "couldnt_fully_check")
+
+    def test_yara_failing_on_a_file_inside_an_archive(self):
+        with mock.patch.object(archive.yararules, "load", return_value=object()), \
+                mock.patch.object(archive.yararules, "scan_target", side_effect=RuntimeError("rules broke")):
+            found = archive.scan(write(samples.zip_of({"a.txt": b"hello"})))
+        self.assertIn("Inside the archive, a.txt: YARA couldn't scan it (RuntimeError).", [f.text for f in found])
+        self.assertEqual(decide([clear(), *found])["verdict"], "couldnt_fully_check")
 
     def test_nothing_ran_is_still_couldnt_check(self):
         self.assertEqual(decide([Finding("archive", ERROR, "x."), Finding("capa", ERROR, "y.")])["verdict"],

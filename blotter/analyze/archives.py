@@ -75,6 +75,11 @@ def _copy_limited(source, target: Path, budget: Budget, declared=None):
     return written
 
 
+def remove(folder) -> None:
+    """Delete one of Blotter's own work folders (made by workdir())."""
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 def walk(path, real, visit, budget: Budget, passwords=None):
     """Call visit(name, unpacked_path) for every file in the archive. Returns notes (e.g. which files were locked)."""
     passwords = [p for p in (passwords or []) if p] + [config.ARCHIVE_PASSWORD]
@@ -115,7 +120,10 @@ def _zip(path, visit, budget, folder, passwords):
                 # rest from the files' own headers (files already checked aren't checked twice).
                 target.unlink(missing_ok=True)
                 notes = _zip_lenient(path, visit, budget, folder, skip=visited)
-                return {**notes, "locked": locked + notes["locked"]}
+                # Files the table of contents lists that no header gave back were lost (an overwritten start).
+                seen = visited | set(notes["read"]) | set(notes["locked"]) | set(notes["damaged"])
+                lost = [i.filename for i in infos if i.filename not in seen]
+                return {**notes, "locked": locked + notes["locked"], "damaged": notes["damaged"] + lost}
             if not opened:
                 locked.append(info.filename)
                 continue
@@ -134,7 +142,7 @@ def _zip_lenient(path, visit, budget, folder, skip=()):
     """Unpack a zip whose table of contents is broken by walking the files' own headers from the start.
     Notes: 'damaged' names files that couldn't be read whole (what could be read is still checked),
     'complete' says whether the walk reached the table of contents, so no file can be missing."""
-    locked, damaged, count, last_end = [], [], 0, None
+    locked, damaged, read, count, last_end = [], [], [], 0, None
     with open(path, "rb") as fh:
         if os.fstat(fh.fileno()).st_size == 0:
             raise zipfile.BadZipFile("the file is empty")
@@ -162,14 +170,13 @@ def _zip_lenient(path, visit, budget, folder, skip=()):
                     last_end = entry["data"] + entry["csize"] if entry["csize"] else None
                 else:
                     last_end, whole = _lenient_member(m, entry, target, budget if name not in skip else Budget())
-                    if not whole:
-                        damaged.append(name)
+                    (read if whole else damaged).append(name)
                     if target.is_file() and target.stat().st_size and name not in skip:
                         visit(name, target)  # whole or not: check what is there
                     target.unlink(missing_ok=True)
                 pos = m.find(LOCAL_HEADER, last_end if last_end is not None else entry["data"])
             complete = last_end is not None and m[last_end:last_end + 4] in DIRECTORY
-    return {"locked": locked, "damaged": damaged, "lenient": True, "complete": complete}
+    return {"locked": locked, "damaged": damaged, "read": read, "lenient": True, "complete": complete}
 
 
 def _local_entry(m, pos):
@@ -448,3 +455,101 @@ def _rar_member(archive, info, target, budget, passwords) -> bool:
         except rarfile.RarCannotExec:  # locked RARs need WinRAR or 7-Zip installed
             return False
     return False
+
+
+# ---------- zips hidden in other files ----------
+
+END_RECORD = b"PK\x05\x06"
+MAX_END_RECORDS = 200
+ZIP_METHODS = {0, 8, 9, 12, 14, 93, 95, 98, 99}
+
+
+def zip_segments(path, after=0, headers_only=True) -> list[tuple[int, int]]:
+    """Where zip data sits in a file, as (start, end) byte ranges in order: an ordinary zip is [(0, size)],
+    a picture with a zip glued on is [(picture size, size)], two zips back to back are two ranges.
+    Found by their end records (read from the back, so a zip stored inside another zip stays part of it)
+    and, where no end record is left (headers_only), by file headers that follow other data. Ignores anything
+    before `after` (a program's own code and resources: only what is appended after it counts)."""
+    with open(path, "rb") as fh:
+        if os.fstat(fh.fileno()).st_size < 30:
+            return []
+        with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            records, pos = [], m.find(END_RECORD, after)
+            while pos >= 0 and len(records) < MAX_END_RECORDS:
+                records.append(pos)
+                pos = m.find(END_RECORD, pos + 4)
+            segments, ceiling = [], len(m)
+            for pos in reversed(records):
+                if pos + 22 > ceiling:
+                    continue  # inside a zip found already (a zip stored in a zip)
+                found = _from_end_record(m, pos, after)
+                if found:
+                    segments.append(found)
+                    ceiling = found[0]
+            segments.reverse()
+            gaps, start = [], after
+            for a, b in segments:
+                gaps.append((start, a))
+                start = b
+            gaps.append((start, len(m)))
+            for a, b in gaps if headers_only else []:  # zip data with no end record left (cut off)
+                i = m.find(LOCAL_HEADER, a, b)
+                while i >= 0 and not _plausible_header(m, i, b):
+                    i = m.find(LOCAL_HEADER, i + 4, b)
+                if i >= 0:
+                    segments.append((i, b))
+            return sorted(segments)
+
+
+def _from_end_record(m, pos, floor):
+    """The zip that ends with the end record at `pos`, or None if it isn't a real one."""
+    _, disk, cd_disk, here, total, cd_size, cd_offset, comment = struct.unpack_from("<4sHHHHIIH", m, pos)
+    if disk or cd_disk or not total or here != total:
+        return None
+    cd_start = pos - cd_size
+    if cd_start < floor or m[cd_start:cd_start + 4] != b"PK\x01\x02":
+        return None
+    start = cd_start - cd_offset  # where the zip's own directory says it starts (its first bytes may be damaged)
+    if start < floor:
+        # The directory points before the file (moved, or damaged on purpose): start at its first real header.
+        start = first_header(m, floor, cd_start)
+    return start, min(pos + 22 + comment, len(m))
+
+
+def first_header(m, start, end) -> int:
+    """The first real local file header from `start` on, or `end` if none is left."""
+    i = m.find(LOCAL_HEADER, start, end)
+    while i >= 0 and not _plausible_header(m, i, end):
+        i = m.find(LOCAL_HEADER, i + 4, end)
+    return i if i >= 0 else end
+
+
+def first_file(path, start, end) -> int:
+    """first_header() for a file on disk: where a zip's first readable file header sits."""
+    with open(path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as m:
+        return first_header(m, start, end)
+
+
+def _plausible_header(m, i, end) -> bool:
+    """A local file header that looks real, not four bytes that happen to read PK\\x03\\x04."""
+    if i + 30 > end:
+        return False
+    version, flags, method, _, _, _, csize, _, name_len, extra_len = struct.unpack_from("<HHHHHIIIHH", m, i + 4)
+    if version > 63 or method not in ZIP_METHODS or not 0 < name_len <= 1024 or extra_len > 8192:
+        return False
+    if i + 30 + name_len + extra_len > end:
+        return False
+    name = m[i + 30:i + 30 + name_len].decode("utf-8" if flags & 0x800 else "cp437", "replace")
+    return name.isprintable() and "�" not in name
+
+
+def cut(path, start, end, folder) -> Path:
+    """Copy bytes start..end of a file into its own file in Blotter's work folder."""
+    target = folder / f"zip-{start}.blotter"
+    with open(path, "rb") as src, open(target, "wb") as out:
+        src.seek(start)
+        left = end - start
+        while left > 0 and (chunk := src.read(min(left, CHUNK))):
+            out.write(chunk)
+            left -= len(chunk)
+    return target
