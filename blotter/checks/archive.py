@@ -15,7 +15,7 @@ from ..analyze import archives, filetype, office, program, scripts, yararules
 from . import filetype as filetype_check
 from . import pdf as pdf_check
 from . import scripts as scripts_check
-from ..findings import CLEAR, ERROR, HIDING, NOTE, SKIPPED, UNCHECKED, Finding
+from ..findings import CLEAR, ERROR, HIDDEN_ZIP, HIDING, NOTE, SKIPPED, UNCHECKED, Finding
 
 ID = "archive"
 NAME = "Archive contents"
@@ -61,7 +61,7 @@ class Sweep:
         except archives.Locked:
             self.locked.append(prefix.rstrip("/") or "the archive")
         except archives.Bomb as e:
-            self.too_big.append(f"{prefix.rstrip('/') or 'the archive'}: {e}")
+            self.too_big.append(f"{prefix.rstrip('/') or 'the archive'} because {e}")
 
     def contents(self, path, ft, prefix, depth) -> bool:
         """Unpack whatever archive data the file holds; False when there is none."""
@@ -135,7 +135,7 @@ class Sweep:
                 found.append(Finding(ID, ERROR, f"YARA couldn't scan it ({type(e).__name__}).", {"scope": name}))
         if depth >= config.ARCHIVE_MAX_DEPTH:
             if ft.real in ARCHIVES or (ft.real != "pe" and archives.zip_segments(path)):
-                self.too_big.append(f"{name}: archives are nested more than {config.ARCHIVE_MAX_DEPTH} deep")
+                self.too_big.append(f"{name} because archives are nested more than {config.ARCHIVE_MAX_DEPTH} deep")
         else:
             self.contents(path, ft, name + "/", depth + 1)
         for f in found:
@@ -169,10 +169,13 @@ def summarize(sweep) -> list[Finding]:
                                          "files inside.", {"hidden_zip": start, "scope": where}))
         else:
             what = "another zip" if ft.real == "zip" else ft.label
+            # After a picture or a document (PDF, Office, RTF...) it counts on its own (Unusual); after another zip it
+            # stays a note for now.
+            signals = [HIDING, HIDDEN_ZIP] if ft.kind in ("image", "document") else [HIDING]
             out.append(Finding(ID, NOTE, f"{it} has a zip archive hidden after {what} (from byte {start:,}), a "
                                          "trick to slip files past checks that only look at the start of a file. "
                                          "Blotter unpacked it and checked the files inside.",
-                               {"hidden_zip": start, "scope": where, "ability": "hidden-zip"}, [HIDING]))
+                               {"hidden_zip": start, "scope": where, "ability": "hidden-zip"}, signals))
     if sweep.damaged:
         shown = ", ".join(sweep.damaged[:5]) + (" …" if len(sweep.damaged) > 5 else "")
         out.append(Finding(ID, NOTE, f"Part of the archive is damaged, so Blotter couldn't read all of it ({shown}). "
@@ -182,7 +185,7 @@ def summarize(sweep) -> list[Finding]:
                                      "7-Zip and similar tools still can. Blotter read every file from their own "
                                      "headers, the same way, and checked them.", {"repaired": sweep.repaired}))
     if sweep.too_big:
-        out.append(Finding(ID, NOTE, "Blotter stopped unpacking because " + "; ".join(sweep.too_big[:3]) +
+        out.append(Finding(ID, NOTE, "Blotter stopped unpacking " + "; and ".join(sweep.too_big[:3]) +
                            ". Files past that point weren't checked.", {"limits": sweep.too_big}, [UNCHECKED]))
     if sweep.locked:
         shown = ", ".join(sweep.locked[:5]) + (" …" if len(sweep.locked) > 5 else "")

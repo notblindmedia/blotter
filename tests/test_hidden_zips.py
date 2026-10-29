@@ -88,6 +88,35 @@ class HiddenZipTests(unittest.TestCase):
         self.assertTrue(any(UNCHECKED in f.signals for f in found))
         self.assertEqual(verdict(found), "suspicious")
 
+    def test_a_clean_zip_after_a_picture_pdf_or_document_is_unusual(self):
+        """The Doctor, after round 2's N1: the headline should say a picture, PDF or document carries files."""
+        clean = samples.zip_of({"notes.txt": b"just text"})
+        ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(1016)  # an older Word file's start
+        rtf = b"{\\rtf1\\ansi Hello.}"
+        for name, carrier in (("jpg", JPG), ("pdf", PDF), ("doc", ole), ("rtf", rtf)):
+            found = self.scan(carrier + clean)
+            self.assertTrue([f for f in found if f.details.get("hidden_zip")], name)
+            v = decide([Finding("filetype", CLEAR, "A file."), *found])
+            self.assertEqual(v["verdict"], "unusual", name)
+            self.assertTrue(v["summary"].startswith("This file has a zip archive hidden after it"), name)
+            self.assertNotIn("nothing hides it", v["summary"], name)
+
+    def test_inside_an_archive_the_picture_counts_too(self):
+        outer = samples.zip_of({"holiday/photo.jpg": JPG + samples.zip_of({"notes.txt": b"just text"})})
+        self.assertEqual(verdict(self.scan(outer)), "unusual")
+
+    def test_what_is_in_the_hidden_zip_still_wins(self):
+        found = self.scan(JPG + samples.zip_of(DISGUISED_PROGRAM))
+        self.assertEqual(verdict(found), "suspicious")
+        detected = Finding("clamav", "malicious", "ClamAV recognises it.", {"engine": "ClamAV", "threat": "Test.Thing"})
+        self.assertEqual(verdict([*self.scan(PDF + samples.zip_of({"a.txt": b"x"})), detected]), "malicious")
+
+    def test_a_clean_zip_after_another_zip_stays_no_known(self):
+        """Not decided yet: zip + zip keeps its note but doesn't raise the answer."""
+        found = self.scan(samples.zip_of({"a.txt": b"first"}) + samples.zip_of({"b.txt": b"second"}))
+        self.assertTrue([f for f in found if f.details.get("hidden_zip")])
+        self.assertEqual(verdict(found), "no_known_detections")
+
     def test_zip_after_a_program_is_an_ordinary_note(self):
         found = self.scan(samples.minimal_pe() + samples.zip_of({"readme.txt": b"setup files"}))
         notes = [f for f in found if f.details.get("hidden_zip")]

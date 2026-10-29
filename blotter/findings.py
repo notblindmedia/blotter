@@ -26,9 +26,10 @@ UNSIGNED = "unsigned"              # a program without a valid signature
 UNKNOWN_ONLINE = "unknown_online"  # VirusTotal has never seen this file
 KNOWN_GOOD = "known_good"          # CIRCL hashlookup lists it as known, common software
 UNCHECKED = "unchecked"            # part of the file couldn't be looked at (locked or oversized archive)
+HIDDEN_ZIP = "hidden_zip"          # a picture or document with a zip archive glued after it: Unusual alone
 
 SIGNALS = (RISKY, WEAK, HIDING, LYING_NAME, DISGUISED, PACKED, PADDED, SIGNED, UNSIGNED, UNKNOWN_ONLINE,
-           KNOWN_GOOD, UNCHECKED)
+           KNOWN_GOOD, UNCHECKED, HIDDEN_ZIP)
 
 
 @dataclass

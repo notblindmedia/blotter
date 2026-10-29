@@ -4,7 +4,7 @@ Malicious            a check recognises it as malware
 Suspicious           a warning sign on its own (a few antivirus engines, a broken signature),
                      a program disguised as another kind of file, or
                      risky abilities PLUS hiding / a lying name / packed and unsigned / unknown everywhere
-Unusual              risky abilities only
+Unusual              risky abilities only, or a zip archive hidden after a picture or document
 
 A valid signature from a well-known publisher (rules/trusted-publishers.txt, not on
 rules/stolen-certificates.txt) quiets the program's abilities (capa, program and script patterns):
@@ -37,7 +37,7 @@ recognises it as malware or couldn't finish.
 import re
 from collections import defaultdict
 
-from .findings import (CLEAR, DISGUISED, ERROR, HIDING, KNOWN_GOOD, LYING_NAME, MALICIOUS, NOTE, PACKED, PADDED,
+from .findings import (CLEAR, DISGUISED, ERROR, HIDDEN_ZIP, HIDING, KNOWN_GOOD, LYING_NAME, MALICIOUS, NOTE, PACKED, PADDED,
                        RISKY, SIGNED, SKIPPED, SUSPICIOUS, UNCHECKED, UNKNOWN, UNKNOWN_ONLINE, UNSIGNED, WEAK,
                        Finding)
 
@@ -70,6 +70,9 @@ VERDICTS = {
         "so Blotter can't say it has no known detections. What it did check, and what it couldn't, is listed below.",
     ),
 }
+# Unusual because a picture or document has a zip archive glued after it (HIDDEN_ZIP), not because of what it can do.
+HIDDEN_SUMMARY = ("This file has a zip archive hidden after it, a trick to slip files past checks. No check "
+                  "recognises the file or the files in the zip as malware. Only use it if you trust where it came from.")
 
 STEPS = ["no_known_detections", "unusual", "suspicious"]
 # Checks made for one kind of file, and YARA. If one of them fails on a file it applies to, part of the file
@@ -195,6 +198,8 @@ def decide(findings, trusted=False) -> dict:
                     continue  # the signature outweighs one weak sign with one bit of context
                 level = "unusual"
             counted.add(scope)
+        elif HIDDEN_ZIP in signals:
+            level, reasons = "unusual", []  # the card's summary says why (HIDDEN_SUMMARY)
         else:
             continue
         if heuristic is None or STEPS.index(level) > STEPS.index(heuristic):
@@ -222,6 +227,9 @@ def decide(findings, trusted=False) -> dict:
         key = "couldnt_check"
 
     title, summary = VERDICTS[key]
+    if key == "unusual" and HIDDEN_ZIP in everything:
+        summary = HIDDEN_SUMMARY + (" Something in it can also do things that malware does." if RISKY in everything
+                                    else "")
     notes = [f.text for f in generic_signed]
     if quieted and key in ("no_known_detections", "unusual"):
         notes.append(f"It is signed by {quieted[0]}, a trusted publisher, so what it can do (listed below) "

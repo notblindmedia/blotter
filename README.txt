@@ -58,6 +58,9 @@ the sandbox.
      a picture or a PDF, two zips back to back, a zip whose first bytes were
      overwritten, and a zip appended after a program (self-extracting
      installers do that; the card says so without counting it as a warning).
+     A zip hidden after a picture or a document (PDF, older Word, RTF) makes
+     the answer at least "Unusual", even when the files in it are clean. Two
+     zips back to back (a .docx counts as a zip here) only get a note.
      Zips a program keeps inside its own code and resources are left alone.
 
 2. What it can do

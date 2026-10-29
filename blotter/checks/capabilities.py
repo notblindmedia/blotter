@@ -108,6 +108,24 @@ NOISE = re.compile(r"^\s*(?:WARNING\b|note:|[-=_\s]*$)", re.I)
 NO_MEMORY = 0xC0000017
 CRASHES = {0xC00000FD: "stack overflow", 0xC0000005: "access violation"}
 LIMITATION = re.compile(r"^internal/limitation")
+# capa's log lines: "ERROR    capa:  Input file does not appear to target a supported   helpers.py:338", the
+# message wrapped onto indented lines below, and its source file in a column on the right.
+LOG_RECORD = re.compile(r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+[\w.]+:\s?(.*)$")
+SOURCE_COLUMN = re.compile(r"\s+[\w.]+\.py:\d+\s*$")
+
+
+def _logged_errors(lines) -> str:
+    """capa's ERROR messages put back together ('Input file does not appear to target a supported architecture.
+    capa currently only supports analyzing x86 (32- and 64-bit).'), without the rulers of dashes around them."""
+    records = []
+    for line in lines:
+        record = LOG_RECORD.match(line)
+        if record:
+            records.append([record.group(1), [SOURCE_COLUMN.sub("", record.group(2)).strip()]])
+        elif records and line[:1].isspace():
+            records[-1][1].append(line.strip())
+    messages = (" ".join(part for part in parts if part) for level, parts in records if level in ("ERROR", "CRITICAL"))
+    return " ".join(m for m in messages if not NOISE.match(m))
 
 
 def command(path) -> list[str]:
@@ -141,7 +159,7 @@ def scan(path) -> list[Finding]:
             return [unchecked(ID, f"capa needed more than the {config.WORKER_MEMORY // 1024 ** 3} GB of memory "
                                   "Blotter gives it for this program, so its abilities weren't checked; the other "
                                   "checks still looked at it.", {"deep_check": True, "exit_code": code})]
-        return [Finding(ID, ERROR, f"capa couldn't analyse this program ({error_line(err, code)[:160]}).",
+        return [Finding(ID, ERROR, f"capa couldn't analyse this program ({error_line(err, code)[:160].rstrip('.')}).",
                         {"exit_code": code})]
     found = interpret(result)
     if note:
@@ -164,6 +182,9 @@ def error_line(err: bytes, code) -> str:
         after = [line.strip() for line in lines[starts[-1] + 1:] if line.strip() and not line[0].isspace()]
         if after:
             return after[0]
+    logged = _logged_errors(lines)
+    if logged:
+        return logged
     errors = [m.group(0).strip() for m in ERROR_LINE.finditer("\n".join(lines))]
     if errors:
         return errors[-1]

@@ -191,6 +191,29 @@ class FailClosedTests(unittest.TestCase):
         found = self.capa(b"WARNING capa.rules: skipping\n   ----\nfailed to load the file\nnote: see the log\n")
         self.assertEqual(found[0].text, "capa couldn't analyse this program (failed to load the file).")
 
+    def test_l3_capa_logged_error_shows_its_message_not_its_source_line(self):
+        """Round 2's L3: Edge's psmachine_arm64.dll read "(ERROR capa: helpers.py:341)". capa's log, as it printed it."""
+        log = (
+            "WARNING  capa.rules: skipping non-.yml file: .version          __init__.py:2214\r\n"
+            "WARNING  capa.features.extractors.pefile: unsupported             pefile.py:138\r\n"
+            "         architecture: IMAGE_FILE_MACHINE_ARM64                                \r\n"
+            "ERROR    capa:                                                   helpers.py:337\r\n"
+            "         -------------------------------------------------------               \r\n"
+            "         -------------------------                                             \r\n"
+            "ERROR    capa:  Input file does not appear to target a supported helpers.py:338\r\n"
+            "         architecture.                                                         \r\n"
+            "ERROR    capa:                                                   helpers.py:339\r\n"
+            "ERROR    capa:  capa currently only supports analyzing x86 (32-  helpers.py:340\r\n"
+            "         and 64-bit).                                                          \r\n"
+            "ERROR    capa:                                                   helpers.py:341\r\n"
+            "         -------------------------------------------------------               \r\n"
+            "         -------------------------                                             \r\n")
+        found = self.capa(log.encode(), 17)
+        self.assertEqual(found[0].text, "capa couldn't analyse this program (Input file does not appear to target a "
+                                        "supported architecture. capa currently only supports analyzing x86 (32- and "
+                                        "64-bit)).")
+        self.assertEqual(decide([clear(), *found])["verdict"], "couldnt_fully_check")
+
     def test_capa_crash_codes_are_named(self):
         found = self.capa(b"WARNING capa.rules: skipping\nException in thread Thread-1:\n", 0xC00000FD)
         self.assertEqual(found[0].text, "capa couldn't analyse this program (it crashed: stack overflow, "

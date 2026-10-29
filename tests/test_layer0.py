@@ -147,6 +147,13 @@ class ArchiveTests(unittest.TestCase):
             found = self.scan(samples.zip_of({f"{i}.txt": "x" for i in range(5)}))
         self.assertTrue(any(UNCHECKED in f.signals and "more than 3 files" in f.text for f in found))
 
+    def test_the_limit_sentence_reads_as_one(self):
+        """Round 2's N2 read "Blotter stopped unpacking because the archive: it would unpack to more than 500 MB"."""
+        with mock.patch.object(config, "ARCHIVE_MAX_TOTAL", 1024 ** 2):
+            found = self.scan(samples.zip_of({"a.bin": bytes(range(256)) * 8192}, compress=0))
+        self.assertIn("Blotter stopped unpacking the archive because it would unpack to more than 1 MB. Files past "
+                      "that point weren't checked.", [f.text for f in found])
+
     def test_7z_plain_and_locked(self):
         for password in (None, "infected"):
             path = Path(tempfile.mkdtemp()) / "a.7z"
