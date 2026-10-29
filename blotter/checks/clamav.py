@@ -9,12 +9,12 @@ from ..findings import CLEAR, ERROR, MALICIOUS, SKIPPED, SUSPICIOUS, Finding, de
 ID = "clamav"
 NAME = "ClamAV"
 ORDER = 35
-TIMEOUT = 180
+TIMEOUT = 300          # includes waiting for ClamAV to load its signatures after a rest
 CACHE = False          # signatures change daily, and it is local and free
 NEEDS_FILE = True
 SANDBOX = False        # only streams the bytes to Blotter's ClamAV (on 127.0.0.1, which a sandbox can't reach)
 
-WAIT_FOR_READY = 90
+WAIT_FOR_READY = 150
 # ClamAV names that are guesses about how a file is built, not a known malware family: its heuristics,
 # "potentially unwanted" tools, and packer/generic names (e.g. Win.Packed.Mikey-9859574-0). These are weak
 # engine signals: Suspicious at most, and Unusual for a program from a well-known publisher (verdict.py).
@@ -23,12 +23,19 @@ GENERIC = re.compile(r"^(?:Heuristics|PUA)\.|^\w+\.(?:Packed|Packer|Packers)\.|\
 PACKER = re.compile(r"^\w+\.(?:Packed|Packer|Packers)\.", re.I)
 
 
+def prepare():
+    """Runs in Blotter itself before the check: start ClamAV if it is resting. Returns what to call afterwards."""
+    clamav.service.wake()
+    return clamav.service.release
+
+
 def scan(path) -> list[Finding]:
     if not settings.load()["clamav"]:
         return [Finding(ID, SKIPPED, "ClamAV is turned off in Settings.")]
     if not clamav.installed():
         return [Finding(ID, SKIPPED, "ClamAV isn't set up (optional; see README.txt, \"ClamAV\").")]
-    deadline = time.monotonic() + WAIT_FOR_READY
+    began = time.monotonic()
+    deadline = began + WAIT_FOR_READY
     while True:
         state = clamav.read_state()
         if state.get("state") == "ready":
@@ -39,7 +46,7 @@ def scan(path) -> list[Finding]:
         time.sleep(2)
     try:
         with open(path, "rb") as f:
-            answer = clamav.scan_stream(f, timeout=TIMEOUT - 20)
+            answer = clamav.scan_stream(f, timeout=max(60, TIMEOUT - 20 - (time.monotonic() - began)))
     except OSError as e:
         return [Finding(ID, ERROR, f"Blotter couldn't reach its ClamAV scanner ({e.strerror or e}).")]
     return interpret(answer, state.get("message", ""))

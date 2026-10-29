@@ -33,6 +33,8 @@ class Sweep:
         self.checked = 0
         self.locked: list[str] = []
         self.too_big: list[str] = []
+        self.damaged: list[str] = []   # files inside that couldn't be read whole, or archives cut off
+        self.repaired: list[str] = []  # archives with a broken table of contents, read whole from file headers
         self.signatures = MAX_SIGNATURES
         self.rules = None
         try:
@@ -45,6 +47,12 @@ class Sweep:
             notes = archives.walk(path, real, lambda name, p: self.member(prefix + name, p, depth), self.budget,
                                   [self.password])
             self.locked += [prefix + n for n in notes.get("locked", [])]
+            self.damaged += [prefix + n for n in notes.get("damaged", [])]
+            where = prefix.rstrip("/") or "the archive"
+            if notes.get("lenient") and not notes.get("complete"):
+                self.damaged.append(f"{where} (cut off or damaged: files after the damage may be missing)")
+            elif notes.get("lenient") and not notes.get("damaged"):
+                self.repaired.append(where)
         except archives.Locked:
             self.locked.append(prefix.rstrip("/") or "the archive")
         except archives.Bomb as e:
@@ -111,6 +119,14 @@ def scan(path) -> list[Finding]:
 
 def summarize(sweep) -> list[Finding]:
     out = list(sweep.findings)
+    if sweep.damaged:
+        shown = ", ".join(sweep.damaged[:5]) + (" …" if len(sweep.damaged) > 5 else "")
+        out.append(Finding(ID, NOTE, f"Part of the archive is damaged, so Blotter couldn't read all of it ({shown}). "
+                                     "Whatever it could read was checked.", {"damaged": sweep.damaged}, [UNCHECKED]))
+    if sweep.repaired:
+        out.append(Finding(ID, NOTE, "The archive's table of contents is damaged, so Windows can't open it, but "
+                                     "7-Zip and similar tools still can. Blotter read every file from their own "
+                                     "headers, the same way, and checked them.", {"repaired": sweep.repaired}))
     if sweep.too_big:
         out.append(Finding(ID, NOTE, "Blotter stopped unpacking because " + "; ".join(sweep.too_big[:3]) +
                            ". Files past that point weren't checked.", {"limits": sweep.too_big}, [UNCHECKED]))

@@ -22,7 +22,7 @@ NAME = "Abilities (capa)"
 ORDER = 55
 TIMEOUT = 15 * 60
 CACHE = True          # capa is slow and gives the same answer for the same file and rules
-CACHE_VERSION = "capa-9.4.0-1"  # change when the rules, capa or the ability list change
+CACHE_VERSION = "capa-9.4.0-2"  # change when the rules, capa or the ability list (or its wording) change
 NEEDS_FILE = True
 BACKGROUND = True     # the deep check: the answer is shown without it and updated when it finishes (runner.py)
 
@@ -87,16 +87,26 @@ ABILITIES = [
 # Weak signs: ordinary programs trip these all the time (a runtime changing its own memory, talking
 # to a device, checking a number, .NET loading its own parts). Quiet on their own; they count when the
 # program is also unsigned, packed or unknown everywhere (verdict.py).
+# (pattern, ability key, sentence, short label for capa's summary line when the sign counts)
 WEAK_ABILITIES = [
     (r"^host-interaction/process/inject ::", "memory", "It can make parts of its own memory runnable or reach "
-     "into process memory. Many ordinary programs (runtimes, script engines) do that; on its own it means little."),
+     "into process memory. Many ordinary programs (runtimes, script engines) do that; on its own it means little.",
+     "it can make its own memory runnable"),
     (r"^collection/credit-card ::", "card-numbers", "It contains code that checks or reads card-like numbers. "
-     "Text tools trip this too; on its own it means little."),
+     "Text tools trip this too; on its own it means little.", "it checks card-like numbers"),
     (r"^host-interaction/(driver|filter) ::", "device", "It talks to a device driver. Disk, game-controller and "
-     "hardware tools do that; on its own it means little."),
+     "hardware tools do that; on its own it means little.", "it talks to a device driver"),
     (r"^load-code/dotnet ::", "load-assembly", "It loads extra .NET code while running. Most .NET programs do "
-     "that; on its own it means little."),
+     "that; on its own it means little.", "it loads extra .NET code"),
 ]
+ERROR_LINE = re.compile(r"^\s*(?:\w+\.)*\w*(?:Error|Exception|Exit)\b.*", re.M)
+# capa (or the signature matcher it uses) ran out of the memory Blotter allows it: a limit, not a crash.
+OUT_OF_MEMORY = re.compile(r"\bMemoryError\b|memory allocation of \d+ bytes failed")
+# Lines that never say what went wrong: warnings, rulers of dashes, hints.
+NOISE = re.compile(r"^\s*(?:WARNING\b|note:|[-=_\s]*$)", re.I)
+# Windows' exit codes for a process that crashed (seen: capa's stack overflow on a Once Human DLL, 2026-10-29).
+NO_MEMORY = 0xC0000017
+CRASHES = {0xC00000FD: "stack overflow", 0xC0000005: "access violation"}
 LIMITATION = re.compile(r"^internal/limitation")
 
 
@@ -127,8 +137,12 @@ def scan(path) -> list[Finding]:
     try:
         result = json.loads(out.decode("utf-8", "replace"))
     except ValueError:
-        tail = err.decode("utf-8", "replace").strip().splitlines()[-1:] or [f"exit code {code}"]
-        return [Finding(ID, ERROR, f"capa couldn't analyse this program ({tail[0][:160]}).")]
+        if code == NO_MEMORY or OUT_OF_MEMORY.search(err.decode("utf-8", "replace")):  # a limit, like the time limit
+            return [unchecked(ID, f"capa needed more than the {config.WORKER_MEMORY // 1024 ** 3} GB of memory "
+                                  "Blotter gives it for this program, so its abilities weren't checked; the other "
+                                  "checks still looked at it.", {"deep_check": True, "exit_code": code})]
+        return [Finding(ID, ERROR, f"capa couldn't analyse this program ({error_line(err, code)[:160]}).",
+                        {"exit_code": code})]
     found = interpret(result)
     if note:
         found.append(Finding(ID, CLEAR, note))
@@ -137,6 +151,24 @@ def scan(path) -> list[Finding]:
                                         f"isn't version {capa_fast.VIVISECT}, so it was slower. The results "
                                         "are the same."))
     return found
+
+
+def error_line(err: bytes, code) -> str:
+    """The line that names what went wrong (the traceback's last line, 'SomethingError: ...'), not whatever capa
+    printed last (a ruler of dashes, a warning about a rules file). Windows' crash codes are named first."""
+    if code in CRASHES:
+        return f"it crashed: {CRASHES[code]}, exit code 0x{code:08X}"
+    lines = err.decode("utf-8", "replace").splitlines()
+    starts = [n for n, line in enumerate(lines) if line.startswith("Traceback (most recent call last)")]
+    if starts:
+        after = [line.strip() for line in lines[starts[-1] + 1:] if line.strip() and not line[0].isspace()]
+        if after:
+            return after[0]
+    errors = [m.group(0).strip() for m in ERROR_LINE.finditer("\n".join(lines))]
+    if errors:
+        return errors[-1]
+    plain = [line.strip() for line in lines if line.strip() and not NOISE.match(line)]
+    return plain[-1] if plain else f"exit code {code}"
 
 
 def _without_overlay(path):
@@ -175,7 +207,7 @@ def interpret(result: dict) -> list[Finding]:
             if re.search(pattern, target, re.I):
                 break
         else:
-            for pattern, ability, sentence in WEAK_ABILITIES:
+            for pattern, ability, sentence, _ in WEAK_ABILITIES:
                 if re.search(pattern, target, re.I) and ability not in seen:
                     seen.add(ability)
                     found.append(weak(ID, ability, sentence, details))
@@ -196,8 +228,11 @@ def interpret(result: dict) -> list[Finding]:
             found.append(risky(ID, ability, text, details, hiding=kind == "both"))
     if all(WEAK in f.signals for f in found):
         count = len(rules)
+        labels = {key: label for _, key, _, label in WEAK_ABILITIES}
+        # When the weak signs count (verdict.py), the card names them instead of saying "none of the risky ones".
         found.append(Finding(ID, CLEAR, f"capa found {count} abilities and none of the risky ones Blotter looks "
-                                        "for.", {"rules": count}))
+                                        "for.", {"rules": count, "weak_labels": [labels[f.details["ability"]]
+                                                                                 for f in found]}))
         return found
     if not found:
         count = len(rules)

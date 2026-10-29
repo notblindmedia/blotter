@@ -59,7 +59,7 @@ function showKeyState(keys) {
 const CLAMAV_WORDS = {
   ready: "Running", starting: "Starting (loading its signatures)", updating: "Downloading its signatures",
   off: "Turned off", not_installed: "Not set up yet (see README.txt, \"ClamAV\")", failed: "Couldn't start",
-  stopped: "Not running",
+  stopped: "Not running", sleeping: "Resting to save memory; it starts with the next check",
 };
 
 function showStatus(s) {
@@ -162,28 +162,68 @@ async function refresh() {
 
 /* ---------- scanning ---------- */
 
+function upload(file, force = false) {
+  return api("/api/scan", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name),
+      ...(force ? { "X-Force": "1" } : {}),
+    },
+    body: file,
+  });
+}
+
+function uploadError(error) {
+  return error.message.includes("Failed to fetch")
+    ? "The file couldn't be read. If you just downloaded it, Microsoft Defender may already have removed it."
+    : error.message;
+}
+
 async function scanFile(file, force = false) {
   lastScan = { file };
   showRunning(file.name);
   try {
-    const job = await api("/api/scan", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "X-File-Name": encodeURIComponent(file.name),
-        ...(force ? { "X-Force": "1" } : {}),
-      },
-      body: file,
-    });
+    const job = await upload(file, force);
     scansById.set(job.id, lastScan);
     render(job);
     poll(job.id);
     refreshRecent();
   } catch (error) {
-    showProblem(file.name, error.message.includes("Failed to fetch")
-      ? "The file couldn't be read. If you just downloaded it, Microsoft Defender may already have removed it."
-      : error.message);
+    showProblem(file.name, uploadError(error));
   }
+}
+
+// Several files at once: each is sent in turn and Blotter checks them side by side (deep checks wait in
+// one line). The first one's card opens; every file shows up in "Checked since Blotter started".
+async function scanFiles(files) {
+  if (files.length === 1) return scanFile(files[0]);
+  const note = $("batch-message");
+  note.hidden = false;
+  const failed = [];
+  let sent = 0;
+  for (const [n, file] of files.entries()) {
+    note.textContent = `Sending file ${n + 1} of ${files.length} to Blotter…`;
+    if (n === 0) {
+      lastScan = { file };
+      showRunning(file.name);
+    }
+    try {
+      const job = await upload(file);
+      scansById.set(job.id, { file });
+      sent += 1;
+      if (n === 0) {
+        render(job);
+        poll(job.id);
+      }
+      refreshRecent();
+    } catch (error) {
+      failed.push(`${file.name} (${uploadError(error)})`);
+      if (n === 0) showProblem(file.name, uploadError(error));
+    }
+  }
+  note.textContent = `Blotter is checking ${sent} of the ${files.length} files; each one is in the list below. ` +
+    "Click a file there to see its card." + (failed.length ? ` Couldn't send: ${failed.join("; ")}.` : "");
 }
 
 async function scanPath(path, force = false) {
@@ -441,13 +481,23 @@ async function quarantineFile() {
 
 /* ---------- drop zone ---------- */
 
+// The dropped files, without folders (Blotter checks files, not whole folders).
 function pickFrom(dataTransfer) {
   const items = [...(dataTransfer.items || [])].filter((i) => i.kind === "file");
-  if (items.length && items[0].webkitGetAsEntry && items[0].webkitGetAsEntry()?.isDirectory) {
-    showProblem("", "That's a folder. Blotter checks one file at a time.");
-    return null;
+  const files = [...dataTransfer.files];
+  const isFolder = items.map((i) => !!(i.webkitGetAsEntry && i.webkitGetAsEntry()?.isDirectory));
+  const picked = files.filter((_, n) => !isFolder[n]);
+  const folders = isFolder.filter(Boolean).length;
+  const note = $("batch-message");
+  if (folders && !picked.length) {
+    showProblem("", "That's a folder. Blotter checks files: open the folder and drop the files inside.");
+  } else if (folders) {
+    note.hidden = false;
+    note.textContent = `Skipped ${folders === 1 ? "a folder" : folders + " folders"}; drop the files inside them to check those.`;
+  } else {
+    note.hidden = true;
   }
-  return dataTransfer.files[0] || null;
+  return picked;
 }
 
 function setup() {
@@ -455,7 +505,11 @@ function setup() {
   const picker = $("picker");
   drop.addEventListener("click", () => picker.click());
   drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); picker.click(); } });
-  picker.addEventListener("change", () => { if (picker.files[0]) scanFile(picker.files[0]); picker.value = ""; });
+  picker.addEventListener("change", () => {
+    $("batch-message").hidden = true;
+    if (picker.files.length) scanFiles([...picker.files]);
+    picker.value = "";
+  });
   for (const name of ["dragenter", "dragover"]) {
     document.addEventListener(name, (e) => { e.preventDefault(); drop.classList.add("over"); });
   }
@@ -465,8 +519,8 @@ function setup() {
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("over");
-    const file = pickFrom(e.dataTransfer);
-    if (file) scanFile(file);
+    const files = pickFrom(e.dataTransfer);
+    if (files.length) scanFiles(files);
   });
 
   $("pick-local").addEventListener("click", async () => {

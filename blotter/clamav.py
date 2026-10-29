@@ -1,7 +1,8 @@
 """ClamAV, the open-source antivirus engine, run portably while Blotter is open. No admin rights, no service.
 
-Blotter starts ClamAV's scanner (clamd.exe) when it starts and it ends with Blotter (procs.Job makes
-sure of that even if Blotter's window is just closed). Signatures live in %LOCALAPPDATA%\\Blotter\\clamav-db
+Blotter starts ClamAV's scanner (clamd.exe) with the first check that needs it, stops it again after
+10 minutes without a check, and it always ends with Blotter (procs.Job makes sure of that even if
+Blotter's window is just closed). Signatures live in %LOCALAPPDATA%\\Blotter\\clamav-db
 and are refreshed once a day by ClamAV's own freshclam. Turn it off in Settings to save memory
 (clamd holds its signatures in about 1-1.5 GB of RAM).
 """
@@ -19,6 +20,8 @@ from . import config, procs, settings
 FRESHCLAM_TIMEOUT = 30 * 60
 UPDATE_EVERY = 24 * 3600
 START_TIMEOUT = 300
+IDLE_STOP = 10 * 60  # clamd stops after this long without a check (it holds about 1 GB while it runs)
+TICK = 30
 STATE_FILE = config.HOME / "clamav-state.json"
 
 
@@ -123,7 +126,10 @@ def read_state() -> dict:
 
 
 class Service:
-    """Owns clamd while Blotter runs. States: off, not_installed, updating, starting, ready, failed."""
+    """Owns clamd while Blotter runs. States: off, not_installed, updating, sleeping, starting, ready, failed.
+
+    clamd starts with the first check that needs it (wake) and stops again after IDLE_STOP without one,
+    so its signatures (about 1 GB of memory) aren't held the whole time Blotter is open."""
 
     def __init__(self):
         self.state, self.message = "stopped", ""
@@ -132,6 +138,9 @@ class Service:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
+        self._want = False      # a check asked for clamd since it last went to sleep
+        self._busy = 0          # checks using it right now
+        self._last_used = 0.0   # time.monotonic() of the last check that started or finished
 
     def _set(self, state, message=""):
         self.state, self.message = state, message
@@ -147,9 +156,31 @@ class Service:
                 "enabled": settings.load()["clamav"]}
 
     def start(self) -> None:
+        """At Blotter's start and when switched on: refresh the signatures if due, but don't load clamd yet."""
+        self._run()
+
+    def wake(self) -> None:
+        """A check needs ClamAV: start clamd unless it runs already. Pair every wake() with a release()."""
         with self._lock:
-            if self._thread and self._thread.is_alive() and self._stop.is_set():
-                self._thread.join(timeout=10)  # switched off a moment ago: let that finish first
+            self._busy += 1
+            self._last_used = time.monotonic()
+            self._want = True
+        if self.state not in ("ready", "starting", "updating") and settings.load()["clamav"] and installed():
+            # Say so at once: the check (in its own process) waits while it reads "starting"
+            self._set("starting", "ClamAV is starting for this check (takes up to a minute)")
+        self._run()
+
+    def release(self) -> None:
+        with self._lock:
+            self._busy = max(0, self._busy - 1)
+            self._last_used = time.monotonic()
+
+    def _run(self) -> None:
+        with self._lock:
+            thread = self._thread
+        if thread and thread.is_alive() and self._stop.is_set():
+            thread.join(timeout=10)  # switched off a moment ago: let that finish first
+        with self._lock:
             if self._thread and self._thread.is_alive():
                 return
             self._stop.clear()
@@ -159,16 +190,30 @@ class Service:
     def stop(self, state="off") -> None:
         self._stop.set()
         with self._lock:
-            if self._job:
-                self._job.close()  # ends clamd and anything it started
-                self._job = None
-            if self._proc:
-                try:
-                    self._proc.kill()
-                except OSError:
-                    pass
-                self._proc = None
+            self._want = False
+            self._end_clamd()
         self._set(state)
+
+    def _end_clamd(self):
+        """With self._lock held."""
+        if self._job:
+            self._job.close()  # ends clamd and anything it started
+            self._job = None
+        if self._proc:
+            try:
+                self._proc.kill()
+            except OSError:
+                pass
+            self._proc = None
+
+    def _sleep(self) -> bool:
+        """With self._lock held: go to sleep unless a check wants clamd. True when this thread should end."""
+        if self._want and not self._stop.is_set():
+            return False
+        self._thread = None  # a wake() from now on starts a new thread
+        if not self._stop.is_set():
+            self._set("sleeping")
+        return True
 
     def _loop(self):
         if not settings.load()["clamav"]:
@@ -181,17 +226,33 @@ class Service:
             if not has_signatures() or signatures_age() > UPDATE_EVERY:
                 self._set("updating", "Downloading ClamAV's signatures")
                 freshclam()
+        except Exception as e:
+            self._set("failed", str(e)[:300])
+            return
+        with self._lock:
+            if self._sleep():
+                return
+        try:
             self._launch()
         except Exception as e:
             self._set("failed", str(e)[:300])
             return
-        while not self._stop.wait(1800):
-            if signatures_age() > UPDATE_EVERY:
-                try:
-                    freshclam()
-                    ask(b"RELOAD", timeout=30)
-                except Exception as e:
-                    self.message = f"Last signature update failed: {str(e)[:200]}"
+        next_update = time.monotonic() + 1800
+        while not self._stop.wait(TICK):
+            with self._lock:
+                if self._busy == 0 and time.monotonic() - self._last_used > IDLE_STOP:
+                    self._want = False
+                    self._end_clamd()
+                    self._sleep()
+                    return
+            if time.monotonic() > next_update:
+                next_update = time.monotonic() + 1800
+                if signatures_age() > UPDATE_EVERY:
+                    try:
+                        freshclam()
+                        ask(b"RELOAD", timeout=30)
+                    except Exception as e:
+                        self.message = f"Last signature update failed: {str(e)[:200]}"
             if self._proc and self._proc.poll() is not None and not self._stop.is_set():
                 try:
                     self._launch()

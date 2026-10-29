@@ -151,7 +151,7 @@ class AppTests(unittest.TestCase):
         req = urllib.request.Request(config.URL + "/", headers={"X-Blotter-Token": TOKEN})
         with urllib.request.urlopen(req, timeout=5) as r:
             page = r.read()
-        self.assertIn(b"Drop a file here", page)
+        self.assertIn(b"Drop files here", page)
         self.assertIn(f'<meta name="blotter-token" content="{TOKEN}">'.encode(), page)
         self.assertEqual(self.request("/api/ping")[1]["app"], "blotter")
 
@@ -305,7 +305,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.raw("/?token=wrong", headers=self.host())[0], 403)
         status, _, _, body = self.raw("/", headers={**self.host(), "Cookie": f"blotter_token={TOKEN}"})
         self.assertEqual(status, 200)
-        self.assertIn(b"Drop a file here", body)
+        self.assertIn(b"Drop files here", body)
         self.assertEqual(self.raw("/api/status", headers={**self.host(), "Cookie": f"blotter_token={TOKEN}"})[0], 200)
 
     def test_changes_need_the_header_not_just_the_cookie(self):

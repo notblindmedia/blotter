@@ -176,12 +176,13 @@ class JobTests(unittest.TestCase):
 class RunnerIsolationTests(unittest.TestCase):
     def test_which_checks_are_isolated(self):
         by_id = {c.ID: c for c in load_checks()}
-        for check_id in ("filetype", "archive", "defender", "clamav", "yara", "program", "capa", "macros", "pdf", "scripts"):
+        for check_id in ("filetype", "archive", "defender", "clamav", "yara", "program", "capa", "macros", "rtf", "pdf",
+                         "scripts"):
             self.assertTrue(isolated(by_id[check_id]), check_id)
         for check_id in ("virustotal", "malwarebazaar", "hashlookup"):
             self.assertFalse(isolated(by_id[check_id]), f"{check_id} only sends the hash")
         sandboxed = {c.ID for c in load_checks() if isolated(c) and getattr(c, "SANDBOX", True)}
-        self.assertEqual(sandboxed, {"filetype", "archive", "yara", "program", "capa", "macros", "pdf", "scripts"},
+        self.assertEqual(sandboxed, {"filetype", "archive", "yara", "program", "capa", "macros", "rtf", "pdf", "scripts"},
                          "every check that parses the file runs in the sandbox")
         self.assertFalse(isolated(fake_check("x", needs_file=True)))
 

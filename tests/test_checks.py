@@ -24,7 +24,7 @@ class RegistryTests(unittest.TestCase):
         checks = load_checks()
         self.assertEqual([c.ID for c in checks],
                          ["filetype", "archive", "virustotal", "malwarebazaar", "hashlookup", "defender", "clamav",
-                          "yara", "signature", "program", "capa", "macros", "pdf", "scripts"])
+                          "yara", "signature", "program", "capa", "macros", "rtf", "pdf", "scripts"])
         for c in checks:
             self.assertTrue(c.TIMEOUT > 0)
             self.assertTrue(callable(c.scan))

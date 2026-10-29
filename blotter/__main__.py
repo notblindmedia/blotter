@@ -127,7 +127,8 @@ def main() -> int:
     app = create_app(token=token, test_mode=test_mode)
     stop = _stopper(app)
     _on_close(stop)
-    # Weekly YARA Forge refresh (skipped when the rules are less than a week old), and ClamAV while open.
+    # Weekly YARA Forge refresh (skipped when the rules are less than a week old). ClamAV's signatures are
+    # refreshed now if due; ClamAV itself starts with the first check and rests after 10 idle minutes.
     threading.Thread(target=lambda: (updates.rules(), yararules.load()), daemon=True).start()
     clamav.service.start()
     if "--no-browser" not in sys.argv:

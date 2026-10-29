@@ -218,7 +218,10 @@ class Runner:
         with self._lock:
             job.checks[check.ID]["state"] = "running"
         background = getattr(check, "BACKGROUND", False)
+        done = None
         try:
+            prepare = getattr(check, "prepare", None)  # e.g. ClamAV starts its scanner if it is resting
+            done = prepare() if callable(prepare) else None
             if isolated(check):
                 findings = worker.run(check.__name__, path, job.name, job.sha256, timeout=check.TIMEOUT,
                                       sandboxed=getattr(check, "SANDBOX", True), password=job.password,
@@ -235,6 +238,9 @@ class Runner:
             signals = [UNCHECKED] if isolated(check) else []
             findings = [Finding(check.ID, ERROR, f"{check.NAME} failed unexpectedly ({type(e).__name__}).",
                                 {"error": str(e)[:300]}, signals)]
+        finally:
+            if callable(done):
+                done()
         # Remember only complete answers: not errors, skips (no key yet), or anything cut short by a limit.
         if getattr(check, "CACHE", False) and not any(f.level in (ERROR, SKIPPED) or UNCHECKED in f.signals
                                                       for f in findings):

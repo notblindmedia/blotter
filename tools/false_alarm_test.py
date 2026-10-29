@@ -53,16 +53,19 @@ def copy_for_check(source: Path):
 def wait_for_clamav():
     if not (settings.load()["clamav"] and clamav.installed()):
         return "ClamAV: off or not set up, so it is skipped."
-    clamav.service.start()
-    deadline = time.monotonic() + 600
-    while time.monotonic() < deadline:
-        state = clamav.service.state
-        if state == "ready":
-            return "ClamAV: running."
-        if state in ("failed", "off", "not_installed"):
-            return f"ClamAV: {state} ({clamav.service.message})."
-        time.sleep(2)
-    return "ClamAV: still not ready after 10 minutes."
+    clamav.service.wake()  # each ClamAV check wakes it again if it rests between files
+    try:
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            state = clamav.service.state
+            if state == "ready":
+                return "ClamAV: running."
+            if state in ("failed", "off", "not_installed"):
+                return f"ClamAV: {state} ({clamav.service.message})."
+            time.sleep(2)
+        return "ClamAV: still not ready after 10 minutes."
+    finally:
+        clamav.service.release()
 
 
 def check_folder(folder: Path, files, runner, parallel=1, log=None, say=print) -> list:

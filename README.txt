@@ -49,6 +49,11 @@ the sandbox.
      waits. Limits stop "zip bombs" (archives built to unpack into
      something enormous): 500 MB in total, 1000 files, 3 archives deep, and
      nothing packed more than 100 times smaller than its real size.
+     A zip whose table of contents is broken (Windows says it is invalid) is
+     still read: Blotter walks each file's own header, the way 7-Zip, WinRAR
+     and tar do, so breaking a zip can't hide a program from it. If files
+     inside are damaged or the zip is cut off, the answer is "Couldn't fully
+     check" (whatever could be read is still checked).
 
 2. What it can do
    - YARA rules: the YARA Forge "core" collection (about 5,000 rules for known
@@ -92,6 +97,12 @@ the sandbox.
      from memory.
    - Office documents: macros (with oletools), auto-run macros, scrambled
      macro code, documents that fetch content from the internet.
+   - RTF documents (oletools' rtfobj): the objects embedded in them. RTF
+     can't hold macros, but its objects are how RTF attacks work: an old
+     Equation Editor object, a linked object that fetches a document from
+     the internet (OLE2Link), objects oletools ties to known Office flaws,
+     a program packed inside ("OLE Package"), or a broken object. Which
+     objects are tied to which flaw comes from oletools' own list.
    - PDFs: JavaScript, actions that run by themselves when the PDF opens,
      "Launch" actions that start programs, files packed inside, and names
      disguised to slip past scanners. Read as bytes, never opened.
@@ -109,6 +120,13 @@ the sandbox.
      variable; VBScript's Execute, ExecuteGlobal, Eval or .Run with a
      variable; a batch variable run as a command. If any of those is there,
      the lists count like any other code.
+     JavaScript files (.js) get their own patterns, because web-app bundles
+     are minified (long lines, short names) and use RegExp .exec(),
+     String.fromCharCode() and eval() all the time. For them only these
+     count: code that starts programs (WScript.Shell, child_process, a
+     shell command), a download that is saved to disk or run, and the marks
+     obfuscators leave (_0x names, a big list of strings fed into eval or
+     Function, a packer, eval of decoded text, long lists of char codes).
 
 3. Who knows it
    - ClamAV (an open-source antivirus) and Microsoft Defender scan it here on
@@ -161,6 +179,9 @@ Couldn't fully check
   Part of the file was over a limit: too big for a check (for example
   programs over 25 MB for capa), archives nested too deep, a check that took
   too long (capa: 15 minutes) or ran out of memory, or a locked archive.
+  Or a check made for this kind of file failed on it: an archive that can't
+  be unpacked, capa that couldn't analyse a program, an Office, RTF or PDF
+  file that couldn't be read. The card names the check and its error.
   Blotter then never says "No known detections", because what it couldn't
   check might be the dangerous part. Warnings it did find still show (and
   Malicious or Suspicious still win).
@@ -226,7 +247,10 @@ USING IT
    time under Settings.
 
 3. Check a file, either way:
-   - Drop it on the page (or click the box). Blotter checks a copy.
+   - Drop it on the page (or click the box). Blotter checks a copy. You can
+     drop or choose several files at once: Blotter checks them all, opens
+     the first one's card and lists every file under "Checked since Blotter
+     started".
    - "Choose a file on this PC..." (or paste its path). Blotter then knows
      where the real file is, so it can quarantine it from the result.
 
@@ -285,7 +309,9 @@ SETTINGS
 
 - API keys (optional).
 - ClamAV on or off. ClamAV keeps its signatures in memory (about 1-1.5 GB)
-  while Blotter is open; turn it off if the PC needs the memory.
+  while it runs. It starts with the first check and stops again after 10
+  minutes without one, so it only holds that memory while you check files;
+  turn it off if the PC needs the memory even then.
 - Rules: when YARA Forge was last downloaded; "Update rules now". Blotter
   also refreshes YARA Forge by itself once a week when it starts.
 - Files you trust, and the quarantine, each with an undo button.
@@ -295,8 +321,9 @@ SETTINGS
 CLAMAV
 
 ClamAV runs portably from %LOCALAPPDATA%\Blotter\clamav: no service, no admin
-rights, nothing in Program Files. Blotter starts it when Blotter starts and
-it ends when Blotter ends. Its signatures (in %LOCALAPPDATA%\Blotter\clamav-db)
+rights, nothing in Program Files. Blotter starts it with the first check that
+needs it (that check waits up to a minute while ClamAV loads), stops it after
+10 minutes without a check, and it always ends when Blotter ends. Its signatures (in %LOCALAPPDATA%\Blotter\clamav-db)
 are refreshed once a day by ClamAV's own updater, freshclam, while Blotter
 is open. It listens only on this PC (127.0.0.1, port 4849).
 To set it up later: run setup.bat again and answer Y.

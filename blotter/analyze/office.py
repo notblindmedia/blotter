@@ -1,4 +1,4 @@
-"""Office documents: macros (oletools' olevba), tricks inside RTF files, and remote templates.
+"""Office documents: macros (oletools' olevba) and remote templates. RTF files go to rtf.py (embedded objects).
 
 Reads the document's parts; never opens it in Office and never runs a macro.
 """
@@ -27,8 +27,9 @@ OBFUSCATED = {"hex string", "base64 string", "dridex string", "vba string", "vba
 def analyze(check, ft, data: bytes, scope=None) -> list[Finding]:
     s = {"scope": scope} if scope else {}
     out = []
-    if ft.real == "rtf":
-        out += _rtf(check, data, s)
+    if ft.real == "rtf":  # RTF can't hold macros; its embedded objects are what matters
+        from . import rtf
+        return rtf.analyze(check, data, scope)
     if ft.real == "ooxml":
         out += _remote_template(check, data, s)
     out += _macros(check, data, s)
@@ -109,25 +110,3 @@ def _remote_template(check, data, s) -> list[Finding]:
     return [risky(check, "remote-template",
         f"When opened, it fetches a {kind} from {url[:120]}. Documents that pull content from the internet "
         "like this are a known way to deliver malware without macros inside.", {**s, "url": url}, hiding=True)]
-
-
-def _rtf(check, data, s) -> list[Finding]:
-    from oletools import rtfobj
-    out = []
-    try:
-        parser = rtfobj.RtfObjParser(data)
-        parser.parse()
-    except Exception:
-        return []
-    for obj in parser.objects[:50]:
-        cls = (getattr(obj, "class_name", b"") or b"").decode("latin-1", "replace") if obj.is_ole else ""
-        if "equation" in cls.lower():
-            out.append(Finding(check, SUSPICIOUS,
-                f"It embeds an old Equation Editor object ({cls}). Real documents almost never contain these "
-                "any more; they are used to attack an old Office flaw (CVE-2017-11882).", {**s, "class": cls}))
-        elif getattr(obj, "is_package", False):
-            fname = getattr(obj, "filename", "") or ""
-            out.append(risky(check, "embedded-file",
-                f"It has a file packed inside it ({fname or 'no name'}) that could be opened from the document.",
-                {**s, "embedded": fname}))
-    return out

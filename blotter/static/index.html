@@ -90,11 +90,12 @@
     </section>
   </section>
 
-  <section id="drop" class="drop" tabindex="0" role="button" aria-label="Drop a file to check">
-    <p class="drop-title">Drop a file here</p>
-    <p class="drop-sub">or <span class="underline">choose a file</span> (Blotter checks a copy)</p>
-    <input id="picker" type="file" hidden>
+  <section id="drop" class="drop" tabindex="0" role="button" aria-label="Drop files to check">
+    <p class="drop-title">Drop files here</p>
+    <p class="drop-sub">or <span class="underline">choose files</span> (Blotter checks a copy of each)</p>
+    <input id="picker" type="file" multiple hidden>
   </section>
+  <p class="hint" id="batch-message" hidden aria-live="polite"></p>
   <div class="by-path">
     <button type="button" id="pick-local" class="button ghost">Choose a file on this PC…</button>
     <form id="path-form" class="path-form">
@@ -152,9 +153,10 @@
     <h2>How Blotter checks a file</h2>
     <ol>
       <li><b>What it really is.</b> Blotter reads the first bytes to find the real file type and spots names that lie
-        (such as invoice.pdf.exe). Zip, rar and 7z archives are unpacked and every file inside is checked.</li>
+        (such as invoice.pdf.exe). Zip, rar and 7z archives are unpacked and every file inside is checked, even
+        from a zip whose table of contents is broken.</li>
       <li><b>What it can do.</b> YARA rules, capa (for programs), the program's signature and packing, Office macros,
-        PDF actions and JavaScript, and script tricks. Nothing is ever opened or run.</li>
+        objects embedded in RTF files, PDF actions and JavaScript, and script tricks. Nothing is ever opened or run.</li>
       <li><b>Who knows it.</b> ClamAV and Microsoft Defender scan it here. CIRCL hashlookup, and with keys VirusTotal
         and MalwareBazaar, are asked about its fingerprint. The file itself is never uploaded.</li>
     </ol>
@@ -165,8 +167,9 @@
       <dt>Unusual</dt><dd>It can do risky things (admin tools, some installers, mods and cheats can), but nothing
         hides or recognises it.</dd>
       <dt>No known detections</dt><dd>Nothing recognised it. That is not a promise the file is harmless.</dd>
-      <dt>Couldn't fully check</dt><dd>Part of the file was too big, nested too deep, took too long, or is locked
-        with a password. Blotter never says "No known detections" then.</dd>
+      <dt>Couldn't fully check</dt><dd>Part of the file was too big, nested too deep, took too long, is locked
+        with a password, or a check made for its kind of file couldn't read it (a damaged archive or document).
+        Blotter never says "No known detections" then.</dd>
       <dt>Couldn't check</dt><dd>None of the checks could run.</dd>
     </dl>
     <h2>Try it</h2>

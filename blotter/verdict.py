@@ -23,7 +23,9 @@ their own. Together with context they count:
   weak + one of (unsigned, packed, VirusTotal never saw it)          -> Unusual
   weak + two of those, or one of those + hiding or a lying name      -> Suspicious
 Couldn't check       nothing could run
-Couldn't fully check part of the file was over a size, depth or time limit (never "No known detections")
+Couldn't fully check part of the file was over a size, depth or time limit, or a check made for its kind of
+                     file (unpacking, capa, Office, RTF, PDF, program, script, signature) failed on it.
+                     Never "No known detections"; only Malicious or Suspicious from another check outranks it.
 
 Known-good software (CIRCL hashlookup) lowers a Suspicious or Unusual that came only from
 abilities by one step. A file you trust can't be more than "No known detections" unless a check
@@ -62,12 +64,16 @@ VERDICTS = {
     ),
     "couldnt_fully_check": (
         "Couldn't fully check",
-        "Part of this file was too big, nested too deep or took too long to check, so Blotter can't say it "
-        "has no known detections. What it did check is listed below.",
+        "Part of this file couldn't be checked (too big, nested too deep, too slow, or a check couldn't read it), "
+        "so Blotter can't say it has no known detections. What it did check, and what it couldn't, is listed below.",
     ),
 }
 
 STEPS = ["no_known_detections", "unusual", "suspicious"]
+# Checks made for one kind of file. If one of them fails on a file it applies to, part of the file wasn't
+# read, so the answer can't be "No known detections" (fail closed). Engines that look at every file
+# (Defender, ClamAV, YARA) and the online lookups keep their errors as plain notes.
+FILE_READERS = {"archive", "capa", "macros", "rtf", "pdf", "program", "scripts", "signature"}
 _ORDER = {MALICIOUS: 0, SUSPICIOUS: 1, NOTE: 2, CLEAR: 3, UNKNOWN: 4, ERROR: 5, SKIPPED: 6}
 _WHY = {
     HIDING: "it also hides what it is or does",
@@ -87,6 +93,13 @@ def _weak(signals, unknown_everywhere):
     level = "suspicious" if len(context) >= 2 or strong else "unusual"
     words = [_CONTEXT[s] for s in context] + [_WHY[s].replace("it also ", "it ") for s in strong]
     return level, ["signs that are common on their own add up: " + ", ".join(words)]
+
+
+def _fail_closed(f):
+    """A file reader that errored didn't finish reading the file: count it like a limit."""
+    if f.level != ERROR or f.check not in FILE_READERS or UNCHECKED in f.signals:
+        return f
+    return Finding(f.check, f.level, f.text, dict(f.details), [*f.signals, UNCHECKED])
 
 
 def _deep_check_skipped(f, signed_by):
@@ -133,7 +146,7 @@ def decide(findings, trusted=False) -> dict:
     # Programs with any other valid signature: it counts for a little (forgives one warning sign).
     mild = {f.details.get("scope", ""): f.details["signed_by"] for f in findings
             if f.details.get("signed_by") and SIGNED in f.signals}
-    findings = [_generic_clamav(_deep_check_skipped(f, signed_by), signed_by) for f in findings]
+    findings = [_generic_clamav(_deep_check_skipped(_fail_closed(f), signed_by), signed_by) for f in findings]
     generic_signed = [f for f in findings if f.details.get("signed_generic")]
     levels = {f.level for f in findings}
     everything = set().union(*(f.signals for f in findings)) if findings else set()
@@ -300,14 +313,24 @@ def _grouped_detections(findings):
     return out
 
 
+def _weak_counted(f) -> Finding:
+    """capa's 'none of the risky ones' line, when its weak signs made the answer Unusual: name them instead."""
+    labels = f.details["weak_labels"]
+    signs = "a weak sign that counts here" if len(labels) == 1 else "weak signs that count here"
+    return Finding(f.check, f.level, f"capa found {f.details.get('rules', 'some')} abilities, including {signs}: "
+                                     f"{'; '.join(labels)}.", dict(f.details), list(f.signals))
+
+
 def _reasons(findings, counted=()) -> list[str]:
     """Reasons, most serious first. Weak signs only appear where they counted (the rest stay in Details).
     Detections naming the same threat are one line here; each check's own line stays under Details."""
     seen, out = set(), []
     grouped = _grouped_detections(findings)
-    for f in sorted(findings, key=lambda f: _ORDER[f.level]):
+    for f in sorted(findings, key=lambda f: 2.5 if UNCHECKED in f.signals else _ORDER[f.level]):
         if f.level == SKIPPED:
             continue
+        if f.details.get("weak_labels") and f.details.get("scope", "") in counted:
+            f = _weak_counted(f)
         if id(f) in grouped:
             if grouped[id(f)]:
                 out.append(grouped[id(f)])

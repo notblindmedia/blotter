@@ -46,6 +46,47 @@ OBFUSCATION = [
     ("cut-up variables", re.compile(r"(?:%\w+:~-?\d+,\d+%.*){5,}", I)),
     ("carets", re.compile(r"\w\^\w\^\w\^\w", I)),
 ]
+# JavaScript (.js) gets its own patterns: web-app bundles are minified (long lines, short names) and use
+# RegExp .exec(), String.fromCharCode() and eval() all the time, which says nothing on its own. What counts
+# is code that starts programs, and the marks obfuscators leave.
+JS_RUNS = re.compile(r"wscript\.shell|shell\.application|shellexecute|child_process|"
+                     r"\b(?:eval|Function)\s*\([^)]{0,80}\bresponse(?:text|body)|"
+                     # a command line, not just the word (code highlighters list "powershell" as a language)
+                     r"\b(?:powershell|pwsh|mshta|rundll32|regsvr32|cscript|wscript)(?:\.exe\b|\s+[-/]\w)|"
+                     r"\bcmd(?:\.exe)?\s+/[ck]\b", I)
+# Download commands (not the XMLHTTP objects a web page or an old Internet Explorer fallback names).
+COMMAND_DOWNLOAD = re.compile(
+    r"invoke-webrequest|\biwr\s|\bwget\s+https?:|\bcurl(?:\.exe)?\s+\S*https?:|downloadstring|downloaddata|"
+    r"downloadfile|start-bitstransfer|bitsadmin(?:\.exe)?\s+/transfer|certutil(?:\.exe)?\s+\S*\s*-urlcache|"
+    r"invoke-restmethod|\birm\s+https?:", I)
+# Web pages fetch things all the time; for a .js file a download matters when it is saved to disk or run.
+JS_SAVES = re.compile(r"adodb\.stream|savetofile|scripting\.filesystemobject|\.writefile(?:sync)?\s*\(|"
+                      r"createwritestream\s*\(", I)
+JS_OBFUSCATION = [
+    ("_0x names", re.compile(r"\b_0x[0-9a-f]{4,}\b(?:.*?\b_0x[0-9a-f]{4,}\b){9}", I)),
+    ("packer", re.compile(r"\beval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[rd]\s*\)")),
+    ("eval of decoded text", re.compile(r"\b(?:eval|Function)\s*\(\s*(?:window\.)?(?:unescape|atob|decodeURIComponent|"
+                                        r"String\.fromCharCode)\s*\(")),
+    ("char codes", re.compile(r"String\.fromCharCode\s*\(\s*(?:\d+\s*,\s*){10,}")),
+    ("reversed text", re.compile(r"['\"][^'\"\n]{8,}['\"]\s*\.split\(\s*(?:''|\"\")\s*\)\s*\.reverse\(\s*\)\s*\.join")),
+    ("hex text", re.compile(r"(?:\\x[0-9a-f]{2}){20,}", I)),
+]
+# A big list of strings that is then fed into eval() or Function(): how obfuscators hide the real code.
+JS_STRING_ARRAY = re.compile(r"(?:var|let|const)\s+([\w$]+)\s*=\s*\[\s*(?:'[^'\n]*'|\"[^\"\n]*\")"
+                             r"(?:\s*,\s*(?:'[^'\n]*'|\"[^\"\n]*\")){49,}\s*\]")
+
+
+def js_tricks(text: str) -> list[str]:
+    """The obfuscation marks in a JavaScript file (not plain minification)."""
+    tricks = [name for name, pattern in JS_OBFUSCATION if pattern.search(text)]
+    for m in JS_STRING_ARRAY.finditer(text):
+        fed = re.compile(r"\b(?:eval|Function)\s*\([^;]{0,200}?(?<![\w$])" + re.escape(m.group(1)) + r"\s*\[")
+        if fed.search(text):
+            tricks.append("string list fed into eval/Function")
+            break
+    return tricks
+
+
 SHELLS = {"powershell.exe", "pwsh.exe", "cmd.exe", "mshta.exe", "wscript.exe", "cscript.exe", "rundll32.exe",
           "regsvr32.exe", "certutil.exe", "bitsadmin.exe", "conhost.exe", "forfiles.exe", "msiexec.exe"}
 
@@ -161,7 +202,15 @@ def analyze_text(check, text, kind, scope=None, where="It") -> list[Finding]:
     s = {"scope": scope} if scope else {}
     out = []
     code = code_only(text, kind)
-    downloads, runs = bool(DOWNLOAD.search(code)) and not _only_this_pc(code), bool(EXECUTE.search(code))
+    js = kind == "js"
+    downloads = bool(DOWNLOAD.search(code)) and not _only_this_pc(code)
+    runs = bool((JS_RUNS if js else EXECUTE).search(code))
+    if js and not runs:
+        # Lists still in `code` reach code that runs text (code_only): a command in one of them is what runs.
+        listed = " ".join(m.group(0) for m in STRING_LIST.finditer(code))
+        runs = bool(listed and (EXECUTE.search(listed) or COMMAND_DOWNLOAD.search(listed)))
+    if js and downloads and not runs:
+        downloads = bool(JS_SAVES.search(code))
     if downloads and runs:
         out.append(risky(check, "download-run",
             f"{where} downloads something from the internet and runs it. Installers and setup scripts do that "
@@ -173,14 +222,15 @@ def analyze_text(check, text, kind, scope=None, where="It") -> list[Finding]:
         out.append(hiding(check, "encoded-command",
             f"{where} runs an encoded PowerShell command, so you can't read what it does. "
             "Legitimate scripts rarely need that; malware does it to hide.", s))
-    elif BASE64_BLOB.search(text) and (FROM_BASE64.search(text) or runs):
+    elif BASE64_BLOB.search(text) and (runs or "eval of decoded text" in js_tricks(text) if js else
+                                        FROM_BASE64.search(text) or runs):
         out.append(hiding(check, "encoded-blob",
             f"{where} carries a long block of encoded text (base64) and decodes or runs it. Some installers "
             "embed files like that, but it is also how malware hides its real code.", s))
     if HIDDEN_WINDOW.search(text):
         out.append(hiding(check, "hidden-window",
             f"{where} runs with its window hidden, so you wouldn't see it working.", s))
-    tricks = [name for name, pattern in OBFUSCATION if pattern.search(text)]
+    tricks = js_tricks(text) if js else [name for name, pattern in OBFUSCATION if pattern.search(text)]
     if tricks:
         out.append(hiding(check, "obfuscation",
             f"{where} is scrambled ({', '.join(tricks)}) so it's hard to read. Some tools do that to protect "

@@ -16,6 +16,8 @@ def scan(path) -> list[Finding]:
     ft = filetype.detect(path)
     if ft.real not in office.OFFICE_REALS:
         return [Finding(ID, SKIPPED, "Not an Office document, so there were no macros to look for.")]
+    if ft.real == "rtf":
+        return [Finding(ID, SKIPPED, "RTF files can't hold macros; the RTF check looks at what is embedded in it.")]
     with open(path, "rb") as f:
         data = f.read(MAX_SIZE + 1)
     if len(data) > MAX_SIZE:
