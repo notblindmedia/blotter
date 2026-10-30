@@ -156,6 +156,18 @@ class HiddenZipTests(unittest.TestCase):
         self.assertFalse([f for f in nested if f.details.get("scope") == "letter.docm" and f.details.get("ability")
                           == "wrong-ending"])
 
+    def test_a_self_running_macro_with_a_zip_glued_on_is_suspicious_and_says_why(self):
+        """The Doctor's decision: Suspicious, and the card says why."""
+        from blotter.checks import filetype as filetype_check, macros
+        path = write(samples.docm() + samples.zip_of({"notes.txt": b"just text"}))
+        result = decide(filetype_check.scan(path) + macros.scan(path) + archive.scan(path))
+        self.assertEqual(result["verdict"], "suspicious")
+        self.assertIn("a macro that runs by itself plus hidden files is a common way to drop malware", result["summary"])
+        alone = write(samples.docm())
+        result = decide(filetype_check.scan(alone) + macros.scan(alone) + archive.scan(alone))
+        self.assertEqual(result["verdict"], "unusual")
+        self.assertNotIn("hidden files", result["summary"])
+
     def test_a_zip_inside_an_older_office_files_own_data_is_not_hidden(self):
         """Round 2's N3: Steam's ThirdPartyLegalNotices.doc keeps Word's theme as a zip inside the OLE file."""
         theme = samples.zip_of({"[Content_Types].xml": "<Types/>", "theme/theme/theme1.xml": "<a:theme/>"})

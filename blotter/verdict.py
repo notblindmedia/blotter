@@ -90,6 +90,11 @@ _WHY = {
     PACKED: "it is a packed program without a valid signature",
     UNKNOWN_ONLINE: "VirusTotal has never seen this file",
 }
+# Said instead of HIDING's reason when an Office file's self-running macro and a zip glued after it are in the same
+# file (the Doctor's decision: Suspicious).
+MACRO_DROP = ("it also hides files in a zip glued after the document: a macro that runs by itself plus hidden files "
+              "is a common way to drop malware")
+AUTORUN = {"macro-autorun", "macro-autorun-exec"}
 _CONTEXT = {UNSIGNED: "it isn't signed", PACKED: "it is packed", UNKNOWN_ONLINE: "VirusTotal has never seen it"}
 
 
@@ -169,6 +174,7 @@ def decide(findings, trusted=False) -> dict:
     levels = {f.level for f in findings}
     everything = set().union(*(f.signals for f in findings)) if findings else set()
     unknown_everywhere = UNKNOWN_ONLINE in everything and KNOWN_GOOD not in everything
+    autorun = {f.details.get("scope", "") for f in findings if f.details.get("ability") in AUTORUN}
 
     heuristic, why, counted, quieted = None, [], set(), []
     for scope, signals in _abilities(findings).items():
@@ -185,6 +191,8 @@ def decide(findings, trusted=False) -> dict:
             continue
         elif RISKY in signals:
             reasons = [_WHY[s] for s in (HIDING, LYING_NAME) if s in signals]
+            if HIDDEN_ZIP in signals and scope in autorun:
+                reasons = [MACRO_DROP if r == _WHY[HIDING] else r for r in reasons]
             if PACKED in signals and SIGNED not in signals:
                 reasons.append(_WHY[PACKED])
             if unknown_everywhere:
