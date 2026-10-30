@@ -8,6 +8,7 @@ Locked archives are tried with the password the person typed in (if any), then "
 own header instead, as 7-Zip, WinRAR and tar do, so breaking it can't hide what is inside.
 """
 
+import io
 import mmap
 import os
 import struct
@@ -18,6 +19,7 @@ import zlib
 from pathlib import Path
 
 from .. import cleanup, config
+from . import filetype
 
 CHUNK = 1024 * 1024
 WINDOWS_TAR = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
@@ -541,6 +543,18 @@ def _plausible_header(m, i, end) -> bool:
         return False
     name = m[i + 30:i + 30 + name_len].decode("utf-8" if flags & 0x800 else "cp437", "replace")
     return name.isprintable() and "�" not in name
+
+
+def document_part(path, segments=None, limit=200 * 1024 ** 2):
+    """For zips glued together: (FileType, end) when the first one is really an Office or OpenDocument file or a
+    Java program (a .docx with a zip after it reads as two zips), else None. Parts over `limit` stay plain zips."""
+    segments = zip_segments(path) if segments is None else segments
+    if len(segments) < 2 or segments[0][0] != 0 or segments[0][1] > limit:
+        return None
+    with open(path, "rb") as f:
+        first = f.read(segments[0][1])
+    ft = filetype.zip_type(io.BytesIO(first))
+    return (ft, segments[0][1]) if ft.real in ("ooxml", "odf", "jar") else None
 
 
 def cut(path, start, end, folder) -> Path:

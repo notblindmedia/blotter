@@ -4,7 +4,7 @@ Malicious            a check recognises it as malware
 Suspicious           a warning sign on its own (a few antivirus engines, a broken signature),
                      a program disguised as another kind of file, or
                      risky abilities PLUS hiding / a lying name / packed and unsigned / unknown everywhere
-Unusual              risky abilities only, or a zip archive hidden after a picture or document
+Unusual              risky abilities only, or a zip archive hidden after a picture, document or .jar
 
 A valid signature from a well-known publisher (rules/trusted-publishers.txt, not on
 rules/stolen-certificates.txt) quiets the program's abilities (capa, program and script patterns):
@@ -70,7 +70,8 @@ VERDICTS = {
         "so Blotter can't say it has no known detections. What it did check, and what it couldn't, is listed below.",
     ),
 }
-# Unusual because a picture or document has a zip archive glued after it (HIDDEN_ZIP), not because of what it can do.
+# Unusual because a picture, document or .jar has a zip archive glued after it (HIDDEN_ZIP), not because of what it
+# can do.
 HIDDEN_SUMMARY = ("This file has a zip archive hidden after it, a trick to slip files past checks. No check "
                   "recognises the file or the files in the zip as malware. Only use it if you trust where it came from.")
 

@@ -111,6 +111,49 @@ class HiddenZipTests(unittest.TestCase):
         detected = Finding("clamav", "malicious", "ClamAV recognises it.", {"engine": "ClamAV", "threat": "Test.Thing"})
         self.assertEqual(verdict([*self.scan(PDF + samples.zip_of({"a.txt": b"x"})), detected]), "malicious")
 
+    def test_a_clean_zip_after_an_office_opendocument_or_java_file_is_unusual(self):
+        """The Doctor: two zips where the first is really a Word, Excel, PowerPoint, OpenDocument or Java file."""
+        clean = samples.zip_of({"notes.txt": b"just text"})
+        firsts = {
+            "docx": ({"[Content_Types].xml": "<Types/>", "word/document.xml": "<w:document/>"}, "an Office document"),
+            "xlsx": ({"[Content_Types].xml": "<Types/>", "xl/workbook.xml": "<workbook/>"}, "an Office document"),
+            "pptx": ({"[Content_Types].xml": "<Types/>", "ppt/presentation.xml": "<p/>"}, "an Office document"),
+            "odt": ({"mimetype": "application/vnd.oasis.opendocument.text", "content.xml": "<o/>"}, "an OpenDocument"),
+            "jar": ({"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\n", "a/B.class": b"\xca\xfe\xba\xbe" + bytes(60)},
+                    "a Java program (JAR)"),
+        }
+        for name, (files, label) in firsts.items():
+            found = self.scan(samples.zip_of(files) + clean)
+            notes = [f for f in found if f.details.get("hidden_zip")]
+            self.assertTrue(notes, name)
+            self.assertIn(f"hidden after {label}", notes[0].text, name)
+            self.assertEqual(verdict(found), "unusual", name)
+
+    def test_macros_in_an_office_file_with_a_zip_glued_on_are_still_checked(self):
+        """Without the fix the macro check saw a plain zip and skipped the document."""
+        from blotter.checks import macros
+        from tests.test_layer2 import abilities
+        found = macros.scan(write(samples.docm() + samples.zip_of({"notes.txt": b"just text"})))
+        self.assertIn("macro-autorun", abilities(found))
+        self.assertEqual(abilities(found), abilities(macros.scan(write(samples.docm()))))  # same as the .docm alone
+
+    def test_a_zip_inside_an_older_office_files_own_data_is_not_hidden(self):
+        """Round 2's N3: Steam's ThirdPartyLegalNotices.doc keeps Word's theme as a zip inside the OLE file."""
+        theme = samples.zip_of({"[Content_Types].xml": "<Types/>", "theme/theme/theme1.xml": "<a:theme/>"})
+        stream = b"Word text. " * 100 + theme
+        stream += bytes(max(0, 4096 - len(stream)))  # samples._cfb wants streams of 4096 bytes or more
+        doc = samples._cfb([("Root Entry", 5, None, 1, 0xFFFFFFFF), ("WordDocument", 2, stream, 0xFFFFFFFF, 0xFFFFFFFF)])
+        found = self.scan(doc)
+        self.assertFalse([f for f in found if f.details.get("hidden_zip")])
+        inner = [f for f in found if f.details.get("inner_zip")]
+        self.assertTrue(inner and "inside the document's own data" in inner[0].text)
+        self.assertIn("2 files", found[-1].text)  # still unpacked and checked
+        self.assertEqual(verdict(found), "no_known_detections")
+        glued = self.scan(doc + samples.zip_of({"notes.txt": b"just text"}))
+        hidden = [f for f in glued if f.details.get("hidden_zip")]
+        self.assertEqual([f.details["hidden_zip"] for f in hidden], [len(doc)])  # only the one after the file
+        self.assertEqual(verdict(glued), "unusual")
+
     def test_a_clean_zip_after_another_zip_stays_no_known(self):
         """Not decided yet: zip + zip keeps its note but doesn't raise the answer."""
         found = self.scan(samples.zip_of({"a.txt": b"first"}) + samples.zip_of({"b.txt": b"second"}))

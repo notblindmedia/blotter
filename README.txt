@@ -58,9 +58,12 @@ the sandbox.
      a picture or a PDF, two zips back to back, a zip whose first bytes were
      overwritten, and a zip appended after a program (self-extracting
      installers do that; the card says so without counting it as a warning).
-     A zip hidden after a picture or a document (PDF, older Word, RTF) makes
-     the answer at least "Unusual", even when the files in it are clean. Two
-     zips back to back (a .docx counts as a zip here) only get a note.
+     A zip hidden after a picture, a document (PDF, Word, Excel, PowerPoint,
+     OpenDocument, RTF) or a Java program (.jar) makes the answer at least
+     "Unusual", even when the files in it are clean, and the Office macro
+     check still reads the document part. Two plain zips back to back only
+     get a note. A zip inside an older Word file's own data (newer Word keeps
+     its theme there) is unpacked and checked without the warning.
      Zips a program keeps inside its own code and resources are left alone.
 
 2. What it can do

@@ -38,7 +38,9 @@ class Sweep:
         self.locked: list[str] = []
         self.too_big: list[str] = []
         self.damaged: list[str] = []   # files inside that couldn't be read whole, or archives cut off
-        self.hidden: list[tuple] = []  # (where, its file type, byte offset) of zips hidden in other files
+        # (where, what the zip is glued to, byte offset, inside an older Office file's own data) of zips found in
+        # other files
+        self.hidden: list[tuple] = []
         self.repaired: list[str] = []  # archives with a broken table of contents, read whole from file headers
         self.signatures = MAX_SIGNATURES
         self.rules = None
@@ -80,6 +82,13 @@ class Sweep:
         if ft.real == "zip" and (not segments or segments == [(0, segments[0][1])]):
             self.archive(path, "zip", prefix, depth)  # an ordinary zip (or one too broken to place)
             return True
+        carrier = ft
+        if ft.real == "zip":  # a .docx or .jar with a zip glued after it reads as two zips
+            part = archives.document_part(path, segments)
+            carrier = part[0] if part else ft
+        # A zip inside an older Office file's own data (newer Word keeps its theme that way) isn't glued on: it is
+        # still unpacked and checked, without the warning.
+        own_end = office.ole_end(path) if ft.real == "ole" else None
         found = False
         for start, end in segments:
             if start == 0 and ft.real in ZIP_BASED and ft.real != "zip":
@@ -88,8 +97,9 @@ class Sweep:
                 self._segment(path, start, end, prefix, depth)  # the file's own zip (its start may be overwritten)
             else:
                 at = archives.first_file(path, start, end) if start == 0 else start
-                self.hidden.append((prefix.rstrip("/"), ft, at))
-                self._segment(path, start, end, f"{prefix}zip hidden at byte {at}/", depth)
+                inside = own_end is not None and start < own_end
+                self.hidden.append((prefix.rstrip("/"), carrier, at, inside))
+                self._segment(path, start, end, f"{prefix}zip {'at' if inside else 'hidden at'} byte {at}/", depth)
             found = True
         return found
 
@@ -161,17 +171,21 @@ def scan(path) -> list[Finding]:
 
 def summarize(sweep) -> list[Finding]:
     out = list(sweep.findings)
-    for where, ft, start in sweep.hidden:
+    for where, ft, start, inside in sweep.hidden:
         it = f"Inside the archive, {where}" if where else "It"
-        if ft.real == "pe":
+        if inside:
+            out.append(Finding(ID, NOTE, f"{it} keeps a zip archive inside the document's own data (from byte "
+                                         f"{start:,}); Office stores parts such as themes that way. Blotter unpacked "
+                                         "it and checked the files inside.", {"inner_zip": start, "scope": where}))
+        elif ft.real == "pe":
             out.append(Finding(ID, NOTE, f"{it} carries a zip archive after the program (from byte {start:,}). "
                                          "Self-extracting installers do that; Blotter unpacked it and checked the "
                                          "files inside.", {"hidden_zip": start, "scope": where}))
         else:
             what = "another zip" if ft.real == "zip" else ft.label
-            # After a picture or a document (PDF, Office, RTF...) it counts on its own (Unusual); after another zip it
-            # stays a note for now.
-            signals = [HIDING, HIDDEN_ZIP] if ft.kind in ("image", "document") else [HIDING]
+            # After a picture, a document (PDF, Office, OpenDocument, RTF...) or a Java program it counts on its own
+            # (Unusual); after a plain zip it stays a note for now.
+            signals = [HIDING, HIDDEN_ZIP] if ft.kind in ("image", "document") or ft.real == "jar" else [HIDING]
             out.append(Finding(ID, NOTE, f"{it} has a zip archive hidden after {what} (from byte {start:,}), a "
                                          "trick to slip files past checks that only look at the start of a file. "
                                          "Blotter unpacked it and checked the files inside.",

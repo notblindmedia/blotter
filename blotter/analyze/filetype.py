@@ -96,6 +96,14 @@ def _zip_kind(path):
     return "zip", "a ZIP archive", {}
 
 
+def zip_type(source) -> "FileType":
+    """What a zip really is: an Office or OpenDocument file, a Java program or a plain zip. source: a path or a
+    file object (e.g. the first of two zips glued together)."""
+    real, label, detail = _zip_kind(source)
+    kind = {"ooxml": "document", "odf": "document", "jar": "program"}.get(real, "archive")
+    return FileType(kind, label, real, detail)
+
+
 MAGIC = [
     (b"%PDF", "pdf", "document", "a PDF document"),
     (b"Rar!\x1a\x07", "rar", "archive", "a RAR archive"),
@@ -147,9 +155,7 @@ def detect(path) -> FileType:
             return FileType("program", pe[0], "pe", pe[1])
         return FileType("program", "an old DOS program (MZ)", "mz", {})
     if head.startswith(b"PK\x03\x04") or head.startswith(b"PK\x05\x06"):
-        real, label, detail = _zip_kind(path)
-        kind = {"ooxml": "document", "odf": "document", "jar": "program"}.get(real, "archive")
-        return FileType(kind, label, real, detail)
+        return zip_type(path)
     for magic, real, kind, label in MAGIC:
         if head.startswith(magic):
             return FileType(kind, label, real, {})

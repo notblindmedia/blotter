@@ -24,6 +24,18 @@ RUNS = re.compile(r"^(shell|wscript\.shell|shell\.application|run|exec|createobj
 OBFUSCATED = {"hex string", "base64 string", "dridex string", "vba string", "vba obfuscated strings"}
 
 
+def ole_end(path):
+    """Where an OLE file's own data ends: its header plus the last sector it uses. Anything after that was
+    glued on. None when the file can't be read as OLE."""
+    try:
+        import olefile
+        with olefile.OleFileIO(str(path)) as ole:
+            used = [n for n, nxt in enumerate(ole.fat) if nxt != olefile.FREESECT]
+            return (max(used) + 2) * ole.sectorsize if used else ole.sectorsize
+    except Exception:
+        return None
+
+
 def analyze(check, ft, data: bytes, scope=None) -> list[Finding]:
     s = {"scope": scope} if scope else {}
     out = []
