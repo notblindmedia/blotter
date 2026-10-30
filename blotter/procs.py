@@ -3,10 +3,12 @@
 A job object is a box around a process and everything it starts. Blotter uses it so that
 - a check that hangs is killed together with anything it started (capa, PowerShell),
 - a check that blows up in memory (a file built to choke a parser) is stopped at a limit,
-- ClamAV, which Blotter starts, ends when Blotter ends, even if Blotter's window is just closed.
+- ClamAV, which Blotter starts, ends when the last Blotter using it ends, even if its window is just closed or it
+  crashes (a named job: every Blotter on this PC that uses ClamAV holds it, and Windows ends ClamAV with the last hold).
 No admin rights are needed for any of this.
 """
 
+import contextlib
 import ctypes
 import subprocess
 import sys
@@ -21,6 +23,9 @@ _PRIORITY_CLASS = 0x20
 _JOB_MEMORY = 0x200
 _DIE_ON_UNHANDLED_EXCEPTION = 0x400
 _EXTENDED_LIMIT_INFORMATION = 9
+_BASIC_ACCOUNTING_INFORMATION = 1
+_JOB_OBJECT_QUERY = 0x4
+_WAIT_ABANDONED = 0x80  # the last holder crashed: Windows hands the lock on
 
 
 class _IoCounters(ctypes.Structure):
@@ -36,6 +41,12 @@ class _BasicLimits(ctypes.Structure):
         ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
         ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD),
     ]
+
+
+class _Accounting(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_int64) for n in ("TotalUserTime", "TotalKernelTime", "ThisPeriodTotalUserTime",
+                                              "ThisPeriodTotalKernelTime")] +               [(n, wintypes.DWORD) for n in ("TotalPageFaultCount", "TotalProcesses", "ActiveProcesses",
+                                             "TotalTerminatedProcesses")]
 
 
 class _ExtendedLimits(ctypes.Structure):
@@ -54,17 +65,28 @@ if sys.platform == "win32":
     _k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
     _k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
     _k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    _k32.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                               ctypes.c_void_p)
+    _k32.OpenJobObjectW.restype = wintypes.HANDLE
+    _k32.OpenJobObjectW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+    _k32.CreateMutexW.restype = wintypes.HANDLE
+    _k32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+    _k32.WaitForSingleObject.restype = wintypes.DWORD
+    _k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    _k32.ReleaseMutex.argtypes = (wintypes.HANDLE,)
 
 
 class Job:
     """Processes added to a Job die when the Job is closed (or when Blotter exits). With `priority`
-    (BELOW_NORMAL), every process in it, and everything they start, runs at that priority."""
+    (BELOW_NORMAL), every process in it, and everything they start, runs at that priority. With a `name`, every
+    process on this PC that makes a Job with that name holds the same one: it is closed, and its processes die,
+    when the last of them closes it or ends."""
 
-    def __init__(self, memory_limit: int | None = None, priority: int | None = None):
+    def __init__(self, memory_limit: int | None = None, priority: int | None = None, name: str | None = None):
         self.handle = None
         if sys.platform != "win32":
             return
-        handle = _k32.CreateJobObjectW(None, None)
+        handle = _k32.CreateJobObjectW(None, name)
         if not handle:
             return
         info = _ExtendedLimits()
@@ -88,6 +110,24 @@ class Job:
             return False
         return bool(_k32.AssignProcessToJobObject(self.handle, process_handle))
 
+    def active(self) -> int:
+        """How many processes run in it now."""
+        info = _Accounting()
+        if not self.handle or not _k32.QueryInformationJobObject(self.handle, _BASIC_ACCOUNTING_INFORMATION,
+                                                                 ctypes.byref(info), ctypes.sizeof(info), None):
+            return 0
+        return info.ActiveProcesses
+
+    @staticmethod
+    def held(name: str) -> bool:
+        """True while some process still holds the named Job."""
+        if sys.platform != "win32":
+            return False
+        handle = _k32.OpenJobObjectW(_JOB_OBJECT_QUERY, False, name)
+        if handle:
+            _k32.CloseHandle(handle)
+        return bool(handle)
+
     def kill(self) -> None:
         if self.handle:
             _k32.TerminateJobObject(self.handle, 1)
@@ -96,6 +136,26 @@ class Job:
         if self.handle:
             _k32.CloseHandle(self.handle)
             self.handle = None
+
+
+@contextlib.contextmanager
+def named_lock(name: str, timeout=60):
+    """One process on this PC at a time (a named Windows mutex; if its holder crashes, Windows lets the next one in)."""
+    if sys.platform != "win32":
+        yield
+        return
+    handle = _k32.CreateMutexW(None, False, name)
+    if not handle:
+        raise OSError(ctypes.get_last_error(), "couldn't create the lock")
+    try:
+        if _k32.WaitForSingleObject(handle, int(timeout * 1000)) not in (0, _WAIT_ABANDONED):
+            raise TimeoutError(f"another program held the lock for over {timeout} seconds")
+        try:
+            yield
+        finally:
+            _k32.ReleaseMutex(handle)
+    finally:
+        _k32.CloseHandle(handle)
 
 
 def run(command, input_bytes=b"", timeout=60, memory_limit=None, env=None, priority=None, cancel=None):

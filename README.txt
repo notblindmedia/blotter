@@ -339,7 +339,9 @@ CLAMAV
 ClamAV runs portably from %LOCALAPPDATA%\Blotter\clamav: no service, no admin
 rights, nothing in Program Files. Blotter starts it with the first check that
 needs it (that check waits up to a minute while ClamAV loads), stops it after
-10 minutes without a check, and it always ends when Blotter ends. Its signatures (in %LOCALAPPDATA%\Blotter\clamav-db)
+10 minutes without a check, and it always ends when Blotter ends. If two
+Blotters run at once (the app and a test run), they share one ClamAV: it
+only stops when neither uses it any more, also if one of them crashed. Its signatures (in %LOCALAPPDATA%\Blotter\clamav-db)
 are refreshed once a day by ClamAV's own updater, freshclam, while Blotter
 is open. It listens only on this PC (127.0.0.1, port 4849).
 To set it up later: run setup.bat again and answer Y.

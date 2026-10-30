@@ -1,8 +1,9 @@
 """ClamAV, the open-source antivirus engine, run portably while Blotter is open. No admin rights, no service.
 
-Blotter starts ClamAV's scanner (clamd.exe) with the first check that needs it, stops it again after
-10 minutes without a check, and it always ends with Blotter (procs.Job makes sure of that even if
-Blotter's window is just closed). Signatures live in %LOCALAPPDATA%\\Blotter\\clamav-db
+Blotter starts ClamAV's scanner (clamd.exe) with the first check that needs it, lets go of it again after
+10 minutes without a check, and lets go when it closes. Every Blotter on this PC that uses ClamAV (the app, a
+test runner) shares the one clamd: each holds a named job (procs.Job), and Windows ends clamd only with the last
+hold, also when a Blotter crashes or its window is just closed. Signatures live in %LOCALAPPDATA%\\Blotter\\clamav-db
 and are refreshed once a day by ClamAV's own freshclam. Turn it off in Settings to save memory
 (clamd holds its signatures in about 1-1.5 GB of RAM).
 """
@@ -23,6 +24,15 @@ START_TIMEOUT = 300
 IDLE_STOP = 10 * 60  # clamd stops after this long without a check (it holds about 1 GB while it runs)
 TICK = 30
 STATE_FILE = config.HOME / "clamav-state.json"
+
+
+def job_name() -> str:
+    """The job every Blotter on this PC holds while it uses the clamd on this port."""
+    return f"Local\\Blotter-clamd-{config.CLAMD_PORT}"
+
+
+def clamd_command(conf) -> list:
+    return [str(config.CLAMAV_DIR / "clamd.exe"), f"--config-file={conf}"]
 
 
 def installed() -> bool:
@@ -126,10 +136,11 @@ def read_state() -> dict:
 
 
 class Service:
-    """Owns clamd while Blotter runs. States: off, not_installed, updating, sleeping, starting, ready, failed.
+    """Holds clamd while Blotter runs. States: off, not_installed, updating, sleeping, starting, ready, failed.
 
-    clamd starts with the first check that needs it (wake) and stops again after IDLE_STOP without one,
-    so its signatures (about 1 GB of memory) aren't held the whole time Blotter is open."""
+    clamd starts with the first check that needs it (wake) and is let go again after IDLE_STOP without one,
+    so its signatures (about 1 GB of memory) aren't held the whole time Blotter is open. If another Blotter
+    started it already, this one joins it instead of starting a second; it ends when no Blotter holds it."""
 
     def __init__(self):
         self.state, self.message = "stopped", ""
@@ -192,19 +203,33 @@ class Service:
         with self._lock:
             self._want = False
             self._end_clamd()
-        self._set(state)
+        self._left(state)
 
     def _end_clamd(self):
-        """With self._lock held."""
-        if self._job:
-            self._job.close()  # ends clamd and anything it started
-            self._job = None
-        if self._proc:
+        """With self._lock held. Let go of clamd: Windows ends it (and anything it started) when no other Blotter
+        holds it too."""
+        if self._job and self._job.handle:
+            self._job.close()
+        elif self._proc:  # no job could be made: end the clamd this Blotter started itself
             try:
                 self._proc.kill()
             except OSError:
                 pass
-            self._proc = None
+        self._job = self._proc = None
+
+    def _left(self, state):
+        """After letting go: write the new state, unless another Blotter still uses clamd (its checks read the
+        same state file and would think ClamAV had stopped: round 2's N6)."""
+        if procs.Job.held(job_name()):
+            self.state, self.message = state, ""
+        else:
+            self._set(state)
+
+    def _ended(self) -> bool:
+        """clamd ended (crashed) although this Blotter holds it."""
+        if self._job and self._job.handle:
+            return not self._job.active()
+        return bool(self._proc) and self._proc.poll() is not None
 
     def _sleep(self) -> bool:
         """With self._lock held: go to sleep unless a check wants clamd. True when this thread should end."""
@@ -212,7 +237,7 @@ class Service:
             return False
         self._thread = None  # a wake() from now on starts a new thread
         if not self._stop.is_set():
-            self._set("sleeping")
+            self._left("sleeping")
         return True
 
     def _loop(self):
@@ -235,7 +260,7 @@ class Service:
         try:
             self._launch()
         except Exception as e:
-            self._set("failed", str(e)[:300])
+            self._failed(e)
             return
         next_update = time.monotonic() + 1800
         while not self._stop.wait(TICK):
@@ -253,27 +278,42 @@ class Service:
                         ask(b"RELOAD", timeout=30)
                     except Exception as e:
                         self.message = f"Last signature update failed: {str(e)[:200]}"
-            if self._proc and self._proc.poll() is not None and not self._stop.is_set():
+            if self._ended() and not self._stop.is_set():
                 try:
                     self._launch()
                 except Exception as e:
-                    self._set("failed", str(e)[:300])
+                    self._failed(e)
                     return
+
+    def _failed(self, e):
+        with self._lock:
+            self._end_clamd()
+        self._set("failed", str(e)[:300])
 
     def _launch(self):
         self._set("starting", "ClamAV is loading its signatures (takes up to a minute)")
         clamd_conf, _ = _write_configs()
-        job = procs.Job()
-        proc = subprocess.Popen([str(config.CLAMAV_DIR / "clamd.exe"), f"--config-file={clamd_conf}"],
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                creationflags=procs.NO_WINDOW, cwd=str(config.CLAMAV_DIR))
-        job.add(proc)
-        with self._lock:
-            self._job, self._proc = job, proc
+        proc = None
+        # One Blotter at a time decides whether clamd must be started; a second clamd on the same port would take
+        # it over from the first.
+        with procs.named_lock(job_name() + "-start"):
+            with self._lock:
+                if not (self._job and self._job.handle):
+                    self._job = procs.Job(name=job_name())
+                job = self._job
+            if not job.active():
+                proc = subprocess.Popen(clamd_command(clamd_conf), stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        creationflags=procs.NO_WINDOW, cwd=str(config.CLAMAV_DIR))
+                job.add(proc)
+                with self._lock:
+                    self._proc = proc
         deadline = time.monotonic() + START_TIMEOUT
         while time.monotonic() < deadline and not self._stop.is_set():
-            if proc.poll() is not None:
+            if proc is not None and proc.poll() is not None:
                 raise RuntimeError(f"clamd stopped while starting (exit code {proc.returncode})")
+            if proc is None and not job.active():
+                raise RuntimeError("clamd stopped while starting")
             try:
                 if ask(b"PING", timeout=3) == "PONG":
                     self._set("ready", ask(b"VERSION"))
