@@ -44,6 +44,9 @@ def scan(path) -> list[Finding]:
             why = state.get("message") or {"stopped": "it isn't running"}.get(state.get("state"), state.get("state"))
             return [Finding(ID, ERROR, f"ClamAV wasn't ready ({why}).")]
         time.sleep(2)
+    taken = clamav.port_taken()  # checked again for each file: its bytes only ever go to Blotter's own clamd.exe
+    if taken:
+        return [Finding(ID, ERROR, f"{taken}, so Blotter didn't send the file to it.")]
     try:
         with open(path, "rb") as f:
             answer = clamav.scan_stream(f, timeout=max(60, TIMEOUT - 20 - (time.monotonic() - began)))

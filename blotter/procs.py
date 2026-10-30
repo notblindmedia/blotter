@@ -26,6 +26,9 @@ _EXTENDED_LIMIT_INFORMATION = 9
 _BASIC_ACCOUNTING_INFORMATION = 1
 _JOB_OBJECT_QUERY = 0x4
 _WAIT_ABANDONED = 0x80  # the last holder crashed: Windows hands the lock on
+_QUERY_LIMITED_INFORMATION = 0x1000
+_TCP_TABLE_OWNER_PID_LISTENER = 3
+_AF_INET = 2
 
 
 class _IoCounters(ctypes.Structure):
@@ -74,6 +77,14 @@ if sys.platform == "win32":
     _k32.WaitForSingleObject.restype = wintypes.DWORD
     _k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
     _k32.ReleaseMutex.argtypes = (wintypes.HANDLE,)
+    _k32.OpenProcess.restype = wintypes.HANDLE
+    _k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    _k32.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                ctypes.POINTER(wintypes.DWORD))
+    _iphlp = ctypes.WinDLL("iphlpapi")
+    _iphlp.GetExtendedTcpTable.restype = wintypes.DWORD
+    _iphlp.GetExtendedTcpTable.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), wintypes.BOOL,
+                                           wintypes.ULONG, ctypes.c_int, wintypes.ULONG)
 
 
 class Job:
@@ -154,6 +165,46 @@ def named_lock(name: str, timeout=60):
             yield
         finally:
             _k32.ReleaseMutex(handle)
+    finally:
+        _k32.CloseHandle(handle)
+
+
+def listeners(port: int) -> list[int]:
+    """Process IDs listening for TCP connections on this port (IPv4, on 127.0.0.1 or every address)."""
+    if sys.platform != "win32":
+        return []
+    size = wintypes.DWORD(0)
+    for _ in range(5):  # the table can grow between asking for its size and reading it
+        buffer = ctypes.create_string_buffer(size.value or 1)
+        code = _iphlp.GetExtendedTcpTable(buffer, ctypes.byref(size), False, _AF_INET,
+                                          _TCP_TABLE_OWNER_PID_LISTENER, 0)
+        if code == 0:
+            break
+        if code != 122:  # ERROR_INSUFFICIENT_BUFFER
+            raise OSError(code, "couldn't read the list of listening ports")
+    else:
+        raise OSError(122, "couldn't read the list of listening ports")
+    count = ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD))[0]
+    rows = ctypes.cast(ctypes.addressof(buffer) + 4, ctypes.POINTER(wintypes.DWORD * 6))
+    found = []
+    for i in range(count):
+        _, address, row_port, _, _, pid = rows[i]
+        if ((row_port & 0xFF) << 8 | (row_port >> 8) & 0xFF) == port and address in (0, 0x0100007F):
+            found.append(pid)
+    return found
+
+
+def program_path(pid: int) -> str | None:
+    """The full path of the program a process runs, or None when Windows won't say."""
+    if sys.platform != "win32":
+        return None
+    handle = _k32.OpenProcess(_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(buffer))
+        return buffer.value if _k32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)) else None
     finally:
         _k32.CloseHandle(handle)
 

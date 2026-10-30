@@ -9,6 +9,7 @@ and are refreshed once a day by ClamAV's own freshclam. Turn it off in Settings 
 """
 
 import json
+import os
 import re
 import socket
 import struct
@@ -31,12 +32,35 @@ def job_name() -> str:
     return f"Local\\Blotter-clamd-{config.CLAMD_PORT}"
 
 
+def clamd_exe():
+    return config.CLAMAV_DIR / "clamd.exe"
+
+
 def clamd_command(conf) -> list:
-    return [str(config.CLAMAV_DIR / "clamd.exe"), f"--config-file={conf}"]
+    return [str(clamd_exe()), f"--config-file={conf}"]
 
 
 def installed() -> bool:
-    return (config.CLAMAV_DIR / "clamd.exe").is_file() and (config.CLAMAV_DIR / "freshclam.exe").is_file()
+    return clamd_exe().is_file() and (config.CLAMAV_DIR / "freshclam.exe").is_file()
+
+
+def _same_file(a, b) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def port_taken() -> str | None:
+    """None when nothing listens on ClamAV's port or only Blotter's own clamd.exe does (checked by the listening
+    process's program path). Otherwise why ClamAV can't be used: file bytes must never go to another program."""
+    try:
+        pids = procs.listeners(config.CLAMD_PORT)
+    except OSError:
+        return f"Blotter couldn't check which program uses ClamAV's port ({config.CLAMD_PORT})"
+    for pid in pids:
+        path = procs.program_path(pid)
+        if not path or not _same_file(path, clamd_exe()):
+            name = os.path.basename(path) if path else f"process {pid}"
+            return f"ClamAV port taken by another program ({name} on port {config.CLAMD_PORT})"
+    return None
 
 
 def has_signatures() -> bool:
@@ -301,7 +325,12 @@ class Service:
                 if not (self._job and self._job.handle):
                     self._job = procs.Job(name=job_name())
                 job = self._job
-            if not job.active():
+            taken = port_taken()
+            if taken:
+                raise RuntimeError(taken)
+            # Nothing runs in the job and nothing listens yet: start clamd. (A clamd.exe of Blotter's own that
+            # listens outside the job, from an older Blotter, is used as it is.)
+            if not job.active() and not procs.listeners(config.CLAMD_PORT):
                 proc = subprocess.Popen(clamd_command(clamd_conf), stdin=subprocess.DEVNULL,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                         creationflags=procs.NO_WINDOW, cwd=str(config.CLAMAV_DIR))
@@ -312,10 +341,13 @@ class Service:
         while time.monotonic() < deadline and not self._stop.is_set():
             if proc is not None and proc.poll() is not None:
                 raise RuntimeError(f"clamd stopped while starting (exit code {proc.returncode})")
-            if proc is None and not job.active():
+            if proc is None and not job.active() and not procs.listeners(config.CLAMD_PORT):
                 raise RuntimeError("clamd stopped while starting")
             try:
                 if ask(b"PING", timeout=3) == "PONG":
+                    taken = port_taken()  # what answered must be Blotter's own clamd.exe
+                    if taken:
+                        raise RuntimeError(taken)
                     self._set("ready", ask(b"VERSION"))
                     return
             except OSError:

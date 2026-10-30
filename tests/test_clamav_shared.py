@@ -1,16 +1,26 @@
 """Round 2's N6: two Blotters on one PC (the app and a test runner, or two runners) share one ClamAV. One letting go,
 going idle, closing or crashing must not stop it for the other; it ends with the last one. Two real processes
-(tests/clamav_holder.py), each with Blotter's own clamav.Service, and a fake clamd that only answers PING."""
+(tests/clamav_holder.py), each with Blotter's own clamav.Service, and a fake clamd that only answers PING.
+Before using a running ClamAV, Blotter checks that what listens on its port is its own clamd.exe."""
 
 import json
 import os
 import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
 import time
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from blotter import clamav, config, settings
+from blotter.checks import clamav as clamav_check
+from blotter.findings import ERROR, SKIPPED, Finding
+from blotter.verdict import decide
+from tests.clamav_holder import _Answer
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,6 +41,13 @@ class SharedClamAVTests(unittest.TestCase):
             p.wait(10)
             p.stdin.close()
             p.stdout.close()
+
+    def stand_in_listener(self):
+        """Another program on ClamAV's port that even answers like clamd."""
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", self.port), _Answer)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
 
     def blotter(self):
         # As a plain script: importing the tests package would give each one a home of its own
@@ -106,6 +123,29 @@ class SharedClamAVTests(unittest.TestCase):
         b.kill()
         b.wait(10)
         self.assertTrue(self.gone())
+
+
+    def test_another_program_on_clamavs_port_is_never_used(self):
+        self.stand_in_listener()
+        self.env["FAKE_CLAMD_IS_OWN"] = "0"  # Blotter's own clamd.exe is in its clamav folder, as in real use
+        a = self.blotter()
+        self.assertEqual(self.say(a, "wake"), "failed")
+        state = json.loads((self.home / "clamav-state.json").read_text(encoding="utf-8"))
+        self.assertIn("ClamAV port taken by another program", state["message"])
+        self.assertIn(f"python.exe on port {self.port}", state["message"])
+        self.assertFalse((self.home / "fake-clamd-starts.txt").exists())  # nor started a second one on top
+
+    def test_the_check_sends_no_file_to_another_program_and_fails_closed(self):
+        self.stand_in_listener()
+        path = Path(tempfile.mkdtemp()) / "sample.txt"
+        path.write_bytes(b"just text")
+        with mock.patch.object(config, "CLAMD_PORT", self.port),                 mock.patch.object(clamav, "installed", lambda: True),                 mock.patch.object(clamav, "read_state", lambda: {"state": "ready", "message": ""}),                 mock.patch.object(clamav, "scan_stream", side_effect=AssertionError("file sent")),                 mock.patch.object(settings, "load", lambda: {"clamav": True}):
+            found = clamav_check.scan(path)
+        self.assertEqual(found[0].level, ERROR)
+        self.assertIn("ClamAV port taken by another program", found[0].text)
+        # Defender skipped (test mode) and ClamAV unusable: no antivirus engine scanned it
+        result = decide([Finding("defender", SKIPPED, "Test mode."), *found, Finding("filetype", "clear", "Text.")])
+        self.assertEqual(result["verdict"], "couldnt_fully_check")
 
 
 if __name__ == "__main__":

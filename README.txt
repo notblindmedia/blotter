@@ -341,7 +341,11 @@ rights, nothing in Program Files. Blotter starts it with the first check that
 needs it (that check waits up to a minute while ClamAV loads), stops it after
 10 minutes without a check, and it always ends when Blotter ends. If two
 Blotters run at once (the app and a test run), they share one ClamAV: it
-only stops when neither uses it any more, also if one of them crashed. Its signatures (in %LOCALAPPDATA%\Blotter\clamav-db)
+only stops when neither uses it any more, also if one of them crashed.
+Blotter only sends a file to ClamAV after checking that the program on
+ClamAV's port is its own clamd.exe; if another program has the port, the
+card says "ClamAV port taken by another program" and ClamAV counts as
+unavailable. Its signatures (in %LOCALAPPDATA%\Blotter\clamav-db)
 are refreshed once a day by ClamAV's own updater, freshclam, while Blotter
 is open. It listens only on this PC (127.0.0.1, port 4849).
 To set it up later: run setup.bat again and answer Y.

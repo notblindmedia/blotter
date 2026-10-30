@@ -41,6 +41,8 @@ def holder():
     clamav.signatures_age = lambda: 0
     clamav.TICK = 0.1
     clamav.clamd_command = lambda conf: [sys.executable, str(Path(__file__)), "--fake-clamd"]
+    if os.environ.get("FAKE_CLAMD_IS_OWN", "1") == "1":  # the fake clamd's program counts as Blotter's own clamd.exe
+        clamav.clamd_exe = lambda: Path(getattr(sys, "_base_executable", sys.executable))
     config.CLAMAV_DIR.mkdir(parents=True, exist_ok=True)
     service = clamav.Service()
     for line in sys.stdin:

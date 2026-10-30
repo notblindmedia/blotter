@@ -4,6 +4,7 @@ import io
 import re
 import socket
 import struct
+import sys
 import tempfile
 import threading
 import unittest
@@ -17,6 +18,11 @@ from blotter.checks import clamav as clamav_check
 from blotter.checks import hashlookup
 from blotter.findings import CLEAR, ERROR, KNOWN_GOOD, MALICIOUS, NOTE, SKIPPED, SUSPICIOUS, UNKNOWN
 from tests import samples
+
+
+# The program FakeClamd runs in (this Python), standing in for Blotter's own clamd.exe where the check looks at
+# who listens on ClamAV's port.
+PYTHON = Path(getattr(sys, "_base_executable", sys.executable))
 
 
 class FakeClamd:
@@ -102,6 +108,7 @@ class ClamAVTests(unittest.TestCase):
         try:
             with mock.patch.object(clamav, "installed", return_value=True), \
                  mock.patch.object(clamav, "read_state", side_effect=[{"state": "starting"}, {"state": "ready", "message": ""}]), \
+                 mock.patch.object(clamav, "clamd_exe", return_value=PYTHON), \
                  mock.patch("time.sleep"):
                 [f] = clamav_check.scan(path)
             self.assertEqual(f.level, CLEAR)
