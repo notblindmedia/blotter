@@ -61,7 +61,8 @@ the sandbox.
      A zip hidden after a picture, a document (PDF, Word, Excel, PowerPoint,
      OpenDocument, RTF) or a Java program (.jar) makes the answer at least
      "Unusual", even when the files in it are clean, and the Office macro
-     check still reads the document part. Two plain zips back to back only
+     check still reads the document part (the card names the document, not
+     "a ZIP archive", and lists each macro once). Two plain zips back to back only
      get a note. A zip inside an older Word file's own data (newer Word keeps
      its theme there) is unpacked and checked without the warning.
      Zips a program keeps inside its own code and resources are left alone.

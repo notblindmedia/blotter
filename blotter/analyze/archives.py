@@ -557,6 +557,14 @@ def document_part(path, segments=None, limit=200 * 1024 ** 2):
     return (ft, segments[0][1]) if ft.real in ("ooxml", "odf", "jar") else None
 
 
+def real_type(path):
+    """filetype.detect(), except that a .docx, .odt or .jar with a zip glued after it is that document or program,
+    not a plain zip."""
+    ft = filetype.detect(path)
+    part = document_part(path) if ft.real == "zip" else None
+    return part[0] if part else ft
+
+
 def cut(path, start, end, folder) -> Path:
     """Copy bytes start..end of a file into its own file in Blotter's work folder."""
     target = folder / f"zip-{start}.blotter"

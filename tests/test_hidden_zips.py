@@ -137,6 +137,25 @@ class HiddenZipTests(unittest.TestCase):
         self.assertIn("macro-autorun", abilities(found))
         self.assertEqual(abilities(found), abilities(macros.scan(write(samples.docm()))))  # same as the .docm alone
 
+    def test_a_macro_document_with_a_zip_glued_on_lists_its_macro_once_and_reads_as_the_document(self):
+        """Round 2's N5: the archive sweep unpacked the document part too and listed word/vbaProject.bin's macro a
+        second time, and the type line said "a ZIP archive"."""
+        from blotter.checks import filetype as filetype_check
+        from tests.test_layer0 import scan_named
+        glued = samples.docm() + samples.zip_of({"notes.txt": b"just text"})
+        found = self.scan(glued)
+        self.assertFalse([f.text for f in found if f.details.get("ability", "").startswith("macro")])
+        self.assertHidden([*found, Finding("x", CLEAR, "", {}, [DISGUISED])], "hidden after")
+        alone = scan_named(filetype_check, samples.docm(), "letter.docm")[0].text
+        self.assertEqual(scan_named(filetype_check, glued, "letter.docm")[0].text, alone)
+        self.assertNotIn("ZIP", alone)
+        # Inside an archive the document part's macro is found once, under the glued file's name.
+        nested = self.scan(samples.zip_of({"letter.docm": glued}))
+        macros_found = [f for f in nested if f.details.get("ability") == "macro-autorun"]
+        self.assertEqual([f.details.get("scope") for f in macros_found], ["letter.docm"])
+        self.assertFalse([f for f in nested if f.details.get("scope") == "letter.docm" and f.details.get("ability")
+                          == "wrong-ending"])
+
     def test_a_zip_inside_an_older_office_files_own_data_is_not_hidden(self):
         """Round 2's N3: Steam's ThirdPartyLegalNotices.doc keeps Word's theme as a zip inside the OLE file."""
         theme = samples.zip_of({"[Content_Types].xml": "<Types/>", "theme/theme/theme1.xml": "<a:theme/>"})

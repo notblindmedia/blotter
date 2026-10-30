@@ -1,7 +1,7 @@
 """Layer 0: what the file really is (from its first bytes), and whether its name lies about that."""
 
 from .. import hashing
-from ..analyze import filetype
+from ..analyze import archives, filetype
 from ..findings import CLEAR, DISGUISED, HIDING, LYING_NAME, NOTE, Finding
 
 ID = "filetype"
@@ -13,7 +13,7 @@ NEEDS_FILE = True
 
 
 def scan(path) -> list[Finding]:
-    return judge(filetype.detect(path), hashing.original_name(path))
+    return judge(archives.real_type(path), hashing.original_name(path))
 
 
 def judge(ft, name, scope=None) -> list[Finding]:

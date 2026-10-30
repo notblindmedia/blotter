@@ -91,8 +91,8 @@ class Sweep:
         own_end = office.ole_end(path) if ft.real == "ole" else None
         found = False
         for start, end in segments:
-            if start == 0 and ft.real in ZIP_BASED and ft.real != "zip":
-                continue  # a .docx or .jar is a zip itself, and its own checks read it
+            if start == 0 and carrier.real in ZIP_BASED and carrier.real != "zip":
+                continue  # a .docx or .jar is a zip itself, and its own checks read it (also with a zip glued on)
             if start == 0 and ft.real in ("zip", "unknown"):
                 self._segment(path, start, end, prefix, depth)  # the file's own zip (its start may be overwritten)
             else:
@@ -122,15 +122,18 @@ class Sweep:
 
     def _member(self, name, path, depth):
         ft = filetype.detect(path)
-        found = [f for f in filetype_check.judge(ft, name, scope=name) if f.level != CLEAR]
+        part = archives.document_part(path) if ft.real == "zip" else None
+        doc = part[0] if part else ft  # a .docx with a zip glued after it is judged as the document
+        found = [f for f in filetype_check.judge(doc, name, scope=name) if f.level != CLEAR]
         if ft.real == "pe":
             # Inside the sandbox Windows' signature check isn't available, so only the archive's own
             # programs outside a sandbox get one (Blotter falls back to it when no sandbox could start).
             found += program.analyze(ID, path, scope=name,
                                      check_signature=self.signatures > 0 and not os.environ.get("BLOTTER_WORK"))
             self.signatures -= 1
-        elif ft.real in office.OFFICE_REALS:
-            found += office.analyze(ID, ft, path.read_bytes(), scope=name)
+        elif doc.real in office.OFFICE_REALS:
+            with open(path, "rb") as f:
+                found += office.analyze(ID, doc, f.read(part[1]) if part else f.read(), scope=name)
         elif ft.real == "pdf":
             with open(path, "rb") as f:
                 found += pdf_check.analyze(ID, f.read(pdf_check.MAX_READ), scope=name)
