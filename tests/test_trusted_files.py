@@ -225,10 +225,12 @@ class PaddingTests(unittest.TestCase):
 class DeepCheckSkippedTests(unittest.TestCase):
     TOO_BIG = Finding("capa", NOTE, "The program is over 25 MB ...", {"deep_check": True}, [UNCHECKED])
 
-    def test_signed_says_deep_check_skipped(self):
+    def test_signed_says_deep_check_couldnt_finish(self):
         v = decide([RAN, signed("Python Software Foundation"), self.TOO_BIG])
-        self.assertEqual(v["verdict"], "no_known_detections")
-        self.assertIn("Signed by Python Software Foundation, deep check skipped.", v["reasons"])
+        self.assertEqual(v["verdict"], "deep_check_unfinished")
+        self.assertEqual(v["title"], "Signed by Python Software Foundation, deep check couldn't finish")
+        self.assertIn("Signed by Python Software Foundation, deep check couldn't finish: the program is over 25 MB ...",
+                      v["reasons"])
 
     def test_other_valid_signatures_keep_couldnt_fully_check(self):
         other = Finding("signature", CLEAR, "Signed by OpenJS Foundation.", {"signed_by": "OpenJS Foundation"}, [SIGNED])

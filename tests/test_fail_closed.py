@@ -78,9 +78,12 @@ class FailClosedTests(unittest.TestCase):
                             "capa couldn't analyse")
 
     def test_h2_capa_failure_on_a_well_known_publishers_program_is_not_hidden_either(self):
+        """Not "No known detections": since N7 its own answer, the same however capa failed."""
         signed = Finding("signature", NOTE, "Signed by Google LLC.", {"trusted_publisher": "Google LLC"}, [SIGNED])
         failed = Finding("capa", ERROR, "capa couldn't analyse this program (exit code 1).")
-        self.assertNotClean([clear(), signed, failed], "capa couldn't analyse")
+        v = decide([clear(), signed, failed])
+        self.assertEqual(v["title"], "Signed by Google LLC, deep check couldn't finish")
+        self.assertIn("capa couldn't analyse", " ".join(v["reasons"]))
 
     def test_h3_office_document_that_cant_be_read(self):
         failed = Finding("macros", ERROR, "Blotter couldn't read the document's parts (FileOpenError).")
@@ -183,9 +186,44 @@ class FailClosedTests(unittest.TestCase):
                              ["verdict"], "couldnt_fully_check")
             signed = Finding("signature", NOTE, "Signed.", {"trusted_publisher": "NetEase (Hangzhou) Network Co., Ltd"},
                              [SIGNED])
-            v = decide([clear(), signed, *found])  # the existing rule for limits on a well-known publisher's program
-            self.assertEqual(v["verdict"], "no_known_detections")
-            self.assertIn("Signed by NetEase (Hangzhou) Network Co., Ltd, deep check skipped.", v["reasons"])
+            v = decide([clear(), signed, *found])  # a limit on a well-known publisher's program: N7's one answer
+            self.assertEqual(v["verdict"], "deep_check_unfinished")
+            self.assertEqual(v["title"], "Signed by NetEase (Hangzhou) Network Co., Ltd, deep check couldn't finish")
+
+    def test_n7_any_capa_failure_on_a_well_known_publishers_program_gives_one_answer(self):
+        """Round 2's N7: Chrome's signed setup got "Couldn't fully check" when capa crashed (access violation) and
+        "No known detections" when it ran out of memory. Stand-ins for a crash, out of memory, a timeout, size."""
+        crash = self.capa(b"", 0xC0000005)  # access violation: no output at all
+        out_of_memory = self.capa(b"Traceback (most recent call last):\n  File x\nMemoryError\n", 1)
+        traceback = self.capa(b"Traceback (most recent call last):\n  File x\nvivisect.exc.InvalidAddress: 0x401000\n")
+        with mock.patch.object(capabilities.procs, "run", return_value=(None, b"", b"")), \
+                mock.patch.object(capabilities.config, "CAPA_RULES", Path(__file__).parent):
+            timeout = capabilities.scan(write(samples.minimal_pe()))
+        with mock.patch.object(capabilities, "MAX_SIZE", 10):
+            too_big = capabilities.scan(write(samples.minimal_pe()))
+        self.assertEqual(crash[0].level, ERROR)
+        google = Finding("signature", CLEAR, "Signed.", {"trusted_publisher": "Google LLC"}, [SIGNED])
+        answers = set()
+        for found in (crash, out_of_memory, traceback, timeout, too_big):
+            v = decide([clear(), google, *found])
+            answers.add((v["verdict"], v["title"]))
+            self.assertTrue(any(r.startswith("Signed by Google LLC, deep check couldn't finish: ") for r in v["reasons"]),
+                            v["reasons"])
+            # Unknown or unsigned programs keep "Couldn't fully check"
+            self.assertEqual(decide([clear(), *found])["verdict"], "couldnt_fully_check")
+            unsigned = Finding("signature", NOTE, "Not signed.", {}, [UNSIGNED])
+            self.assertEqual(decide([clear(), unsigned, *found])["verdict"], "couldnt_fully_check")
+            other = Finding("signature", CLEAR, "Signed.", {"signed_by": "Some Small Company"}, [SIGNED])
+            self.assertEqual(decide([clear(), other, *found])["verdict"], "couldnt_fully_check")
+        self.assertEqual(answers, {("deep_check_unfinished", "Signed by Google LLC, deep check couldn't finish")})
+
+    def test_n7_another_gap_still_says_couldnt_fully_check_and_a_detection_still_wins(self):
+        crash = self.capa(b"", 0xC0000005)
+        google = Finding("signature", CLEAR, "Signed.", {"trusted_publisher": "Google LLC"}, [SIGNED])
+        yara_failed = Finding("yara", ERROR, "YARA couldn't scan it.")
+        self.assertEqual(decide([clear(), google, *crash, yara_failed])["verdict"], "couldnt_fully_check")
+        found = Finding("clamav", MALICIOUS, "ClamAV recognises it as malware: Win.Trojan.X.", {"engine": "ClamAV"})
+        self.assertEqual(decide([clear(), google, *crash, found])["verdict"], "malicious")
 
     def test_capa_error_without_a_traceback_shows_its_last_real_line(self):
         found = self.capa(b"WARNING capa.rules: skipping\n   ----\nfailed to load the file\nnote: see the log\n")

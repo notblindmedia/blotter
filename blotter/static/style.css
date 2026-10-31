@@ -104,6 +104,7 @@ a.button { display: inline-block; text-decoration: none; }
 .card-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
 .vt-state { font-size: 14px; opacity: 0.8; margin-right: 8px; }
 .card.v-couldnt_check, .card.v-couldnt_fully_check { border-style: dashed; }
+.card.v-deep_check_unfinished { border-style: dotted; border-width: 3px; }
 .card.running .card-verdict { opacity: 0.5; }
 
 .progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }

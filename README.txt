@@ -201,10 +201,12 @@ Couldn't fully check
   Blotter then never says "No known detections", because what it couldn't
   check might be the dangerous part. Warnings it did find still show (and
   Malicious or Suspicious still win).
-  Exception: for a program signed by a well-known publisher that capa had to
-  skip (too big or too slow), the card says "Signed by <publisher>, deep
-  check skipped" instead. Unsigned programs, and programs signed by anyone
-  else, keep "Couldn't fully check".
+  Exception: for a program signed by a well-known publisher where capa
+  couldn't finish (too big, too slow, out of memory or a crash), the answer
+  is "Signed by <publisher>, deep check couldn't finish" instead: one answer
+  however capa failed, and never "No known detections". If something else
+  couldn't be checked too, it stays "Couldn't fully check". Unsigned
+  programs, and programs signed by anyone else, keep "Couldn't fully check".
   An unsigned program padded with lots of empty filler is Suspicious on its
   own (a trick to get past scanners' size limits).
 

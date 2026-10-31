@@ -8,14 +8,17 @@ Unusual              risky abilities only, or a zip archive hidden after a pictu
 
 A valid signature from a well-known publisher (rules/trusted-publishers.txt, not on
 rules/stolen-certificates.txt) quiets the program's abilities (capa, program and script patterns):
-they stay listed but don't raise the answer. If capa had to skip such a program (too big, too slow),
-the card says "Signed by <publisher>, deep check skipped" instead of "Couldn't fully check".
+they stay listed but don't raise the answer. If capa couldn't finish such a program (too big, too slow, out of
+memory, a crash), the answer is "Signed by <publisher>, deep check couldn't finish": one answer however capa
+failed (round 2's N7), never "No known detections" and, if nothing else was missed, not "Couldn't fully check".
 Any other valid signature forgives one warning sign: risky abilities need two reasons (instead of one)
 to reach Suspicious, and weak signs count one step lower.
 Engine detections that name malware are never quieted. ClamAV's generic guesses (heuristics, PUA,
 packer names) are Suspicious at most, and Unusual for a well-known publisher's program.
 An unsigned program padded with lots of empty filler is Suspicious on its own.
 No known detections  checks ran and found nothing
+Signed by <publisher>, deep check couldn't finish
+                     as No known detections, but capa couldn't finish a well-known publisher's program
 
 Weak signs (things ordinary programs do all the time: a runtime changing its own memory, talking to a
 device, .NET loading its parts, compressed .NET resources, checking card-like numbers) are quiet on
@@ -59,6 +62,12 @@ VERDICTS = {
         "No known detections",
         "None of the checks that ran recognise this file as malware or found risky abilities. "
         "That isn't proof it's harmless: new or rare malware can go unrecognised.",
+    ),
+    "deep_check_unfinished": (  # {publisher}: filled in by decide()
+        "Signed by {publisher}, deep check couldn't finish",
+        "It is signed by {publisher}, a well-known publisher, and no check recognises it as malware. capa's deep "
+        "check of what the program can do couldn't finish, so that part wasn't checked; what a well-known "
+        "publisher's program can do doesn't raise a warning anyway.",
     ),
     "couldnt_check": (
         "Couldn't check",
@@ -124,14 +133,17 @@ def _no_av_scanned(findings) -> bool:
     return bool(tried) and not scanned
 
 
-def _deep_check_skipped(f, signed_by):
-    """For a program signed by a trusted publisher, capa being skipped (too big or too slow) isn't a gap
-    worth "Couldn't fully check": say so plainly instead. Unsigned programs keep the warning."""
+def _deep_check_unfinished(f, signed_by):
+    """For a program signed by a trusted publisher, any capa failure (too big, too slow, out of memory, a crash) is
+    the same note, and gives the answer "Signed by <publisher>, deep check couldn't finish" instead of "Couldn't
+    fully check". Unsigned programs and other signatures keep the warning."""
     scope = f.details.get("scope", "")
-    if not f.details.get("deep_check") or scope not in signed_by:
+    if f.check != "capa" or not (f.details.get("deep_check") or f.level == ERROR) or scope not in signed_by:
         return f
-    return Finding(f.check, NOTE, f"Signed by {signed_by[scope]}, deep check skipped.", dict(f.details),
-                   [s for s in f.signals if s != UNCHECKED])
+    publisher = signed_by[scope]
+    why = f.text[:1].lower() + f.text[1:]
+    return Finding(f.check, NOTE, f"Signed by {publisher}, deep check couldn't finish: {why}",
+                   {**f.details, "deep_check_unfinished": publisher}, [s for s in f.signals if s != UNCHECKED])
 
 
 def _generic_clamav(f, signed_by):
@@ -169,7 +181,7 @@ def decide(findings, trusted=False) -> dict:
     mild = {f.details.get("scope", ""): f.details["signed_by"] for f in findings
             if f.details.get("signed_by") and SIGNED in f.signals}
     no_av = _no_av_scanned(findings)
-    findings = [_generic_clamav(_deep_check_skipped(_fail_closed(f, no_av), signed_by), signed_by) for f in findings]
+    findings = [_generic_clamav(_deep_check_unfinished(_fail_closed(f, no_av), signed_by), signed_by) for f in findings]
     generic_signed = [f for f in findings if f.details.get("signed_generic")]
     levels = {f.level for f in findings}
     everything = set().union(*(f.signals for f in findings)) if findings else set()
@@ -235,7 +247,11 @@ def decide(findings, trusted=False) -> dict:
     else:
         key = "couldnt_check"
 
-    title, summary = VERDICTS[key]
+    unfinished = next((f.details["deep_check_unfinished"] for f in findings if f.details.get("deep_check_unfinished")),
+                      None)
+    if unfinished and key == "no_known_detections":
+        key = "deep_check_unfinished"
+    title, summary = (part.format(publisher=unfinished) for part in VERDICTS[key])
     if key == "unusual" and HIDDEN_ZIP in everything:
         summary = HIDDEN_SUMMARY + (" Something in it can also do things that malware does." if RISKY in everything
                                     else "")
