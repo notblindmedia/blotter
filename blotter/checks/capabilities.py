@@ -14,19 +14,23 @@ from pathlib import Path
 
 from .. import capa_fast, config, procs, worker
 from ..analyze import filetype, program
-from ..findings import (CLEAR, ERROR, SKIPPED, SUSPICIOUS, WEAK, Finding, detected, hiding, risky, unchecked,
-                        weak)
+from ..findings import (CLEAR, ERROR, SIGNED, SKIPPED, SUSPICIOUS, WEAK, Finding, detected, hiding, risky,
+                        unchecked, weak)
 
 ID = "capa"
 NAME = "Abilities (capa)"
 ORDER = 55
 TIMEOUT = 15 * 60
+# A well-known publisher's program gets 5 minutes: its abilities don't raise the answer anyway, and if capa can't
+# finish, the answer is "Signed by <publisher>, deep check couldn't finish" (verdict.py) sooner. Others keep 15.
+TRUSTED_TIMEOUT = 5 * 60
+LIMIT_AFTER = ("signature",)  # the runner waits for these before it picks the time limit (time_limit)
 CACHE = True          # capa is slow and gives the same answer for the same file and rules
 CACHE_VERSION = "capa-9.4.0-2"  # change when the rules, capa or the ability list (or its wording) change
 NEEDS_FILE = True
 BACKGROUND = True     # the deep check: the answer is shown without it and updated when it finishes (runner.py)
 
-CAPA_TIMEOUT = TIMEOUT - 15
+CAPA_TIMEOUT = TIMEOUT - 15  # capa itself stops this much before the worker's limit (also for TRUSTED_TIMEOUT)
 MAX_SIZE = 25 * 1024 * 1024
 
 # (pattern, ability key, kind, sentence), matched against "namespace :: rule name". First match wins.
@@ -128,6 +132,13 @@ def _logged_errors(lines) -> str:
     return " ".join(m for m in messages if not NOISE.match(m))
 
 
+def time_limit(findings) -> int:
+    """The deep check's time limit for this file, from the other checks' findings (the signature check)."""
+    trusted = any(f.details.get("trusted_publisher") and SIGNED in f.signals and not f.details.get("scope")
+                  for f in findings)
+    return TRUSTED_TIMEOUT if trusted else TIMEOUT
+
+
 def command(path) -> list[str]:
     args = ["-j", "-q", "--color", "never", "-r", str(config.CAPA_RULES), "--os", "auto"]
     if config.CAPA_SIGS.is_dir():
@@ -146,10 +157,12 @@ def scan(path) -> list[Finding]:
                           {"deep_check": True})]
     if not config.CAPA_RULES.is_dir():
         return [Finding(ID, ERROR, "capa's rules aren't downloaded yet (run Update rules in Settings).")]
-    code, out, err = procs.run(command(target), timeout=CAPA_TIMEOUT, memory_limit=config.WORKER_MEMORY,
+    limit = int(os.environ.get("BLOTTER_TIME_LIMIT") or TIMEOUT)  # set by the worker (time_limit)
+    code, out, err = procs.run(command(target), timeout=limit - (TIMEOUT - CAPA_TIMEOUT),
+                               memory_limit=config.WORKER_MEMORY,
                                priority=procs.BELOW_NORMAL)  # the deep check never slows the PC down
     if code is None:
-        return [unchecked(ID, f"capa didn't finish this program within {TIMEOUT // 60} minutes, so Blotter "
+        return [unchecked(ID, f"capa didn't finish this program within {limit // 60} minutes, so Blotter "
                               "stopped it. Programs with very many functions can take that long.",
                           {"deep_check": True})]
     try:

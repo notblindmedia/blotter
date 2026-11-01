@@ -77,10 +77,12 @@ the sandbox.
      after it (installer payloads or padding). capa is the deep check: it can
      take minutes, so the card shows the other checks' answer first with
      "Deep check still running…", and updates when capa finishes (it gets up
-     to 15 minutes). Engine detections never wait for it. Deep checks run
+     to 15 minutes; a program signed by a well-known publisher gets 5, then
+     the answer is "Signed by <publisher>, deep check couldn't finish").
+     Engine detections never wait for it. Deep checks run
      one at a time, oldest first, at below-normal CPU priority, so checking
      a batch of files can't slow the PC down; a file that waits says "Deep
-     check queued, 3rd in line" (its 15 minutes start when its turn comes).
+     check queued, 3rd in line" (its time starts when its turn comes).
      Closing Blotter cancels the queue and stops the deep check that is
      running; anything left behind is removed at the next start. Its
      answers are remembered, so checking the same program

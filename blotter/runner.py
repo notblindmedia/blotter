@@ -187,16 +187,34 @@ class Runner:
     def _run_deep(self, item):
         """Run one deep check from the queue, with its own time limit; a cancel stops it at once."""
         check = item.check
+        limit = self._deep_limit(item)
         t = threading.Thread(target=self._run_check, daemon=True,
-                             args=(item.job, check, item.path, item.save_error, item.force, item.cancel))
+                             args=(item.job, check, item.path, item.save_error, item.force, item.cancel, limit))
         t.start()
-        deadline = time.monotonic() + check.TIMEOUT + (5 if isolated(check) else 0)
+        deadline = time.monotonic() + limit + (5 if isolated(check) else 0)
         while t.is_alive() and time.monotonic() < deadline and not item.cancel.is_set():
             t.join(0.25)
         if item.cancel.is_set() and isolated(check):
             t.join(5)  # the worker process is killed at once; this waits for its folder to be cleaned up
         if t.is_alive():
-            self._finish(item.job, check.ID, [_cancelled(check) if item.cancel.is_set() else _too_slow(check)])
+            self._finish(item.job, check.ID, [_cancelled(check) if item.cancel.is_set() else _too_slow(check, limit)])
+
+    def _deep_limit(self, item):
+        """A deep check's time limit can depend on other checks (capa: 5 minutes for a well-known publisher's
+        program, from the signature check). Wait for those first; they take seconds."""
+        check, job = item.check, item.job
+        needs = getattr(check, "LIMIT_AFTER", ())
+        if not callable(getattr(check, "time_limit", None)):
+            return check.TIMEOUT
+        while not item.cancel.is_set():
+            with self._lock:
+                if all(job.checks[n]["state"] == "done" for n in needs if n in job.checks):
+                    findings = [f for c in job.checks.values() for f in c["findings"]]
+                    break
+            item.cancel.wait(0.1)
+        else:
+            return check.TIMEOUT
+        return min(check.TIMEOUT, check.time_limit(findings))
 
     def _quick_answer(self, job, check, save_error, force) -> bool:
         """Answers that need no work: a remembered one, or none because the copy couldn't be saved."""
@@ -212,7 +230,7 @@ class Runner:
             return True
         return False
 
-    def _run_check(self, job, check, path, save_error, force, cancel=None):
+    def _run_check(self, job, check, path, save_error, force, cancel=None, limit=None):
         if cancel is None and self._quick_answer(job, check, save_error, force):
             return  # (deep checks were asked before they were queued)
         with self._lock:
@@ -223,7 +241,7 @@ class Runner:
             prepare = getattr(check, "prepare", None)  # e.g. ClamAV starts its scanner if it is resting
             done = prepare() if callable(prepare) else None
             if isolated(check):
-                findings = worker.run(check.__name__, path, job.name, job.sha256, timeout=check.TIMEOUT,
+                findings = worker.run(check.__name__, path, job.name, job.sha256, timeout=limit or check.TIMEOUT,
                                       sandboxed=getattr(check, "SANDBOX", True), password=job.password,
                                       priority=procs.BELOW_NORMAL if background else None, cancel=cancel)
             else:
@@ -232,7 +250,7 @@ class Runner:
         except worker.Cancelled:
             findings = [_cancelled(check)]
         except TimeoutError:
-            findings = [_too_slow(check)]
+            findings = [_too_slow(check, limit)]
         except Exception as e:  # a broken check must not break the others
             # A worker that dies (a parser crash, or the memory limit) didn't finish reading the file.
             signals = [UNCHECKED] if isolated(check) else []
@@ -350,9 +368,9 @@ def _cancelled(check) -> Finding:
                    [UNCHECKED])
 
 
-def _too_slow(check) -> Finding:
-    return Finding(check.ID, ERROR, f"{check.NAME} took longer than {duration(check.TIMEOUT)}, so Blotter stopped it.",
-                   {}, [UNCHECKED])
+def _too_slow(check, limit=None) -> Finding:
+    return Finding(check.ID, ERROR, f"{check.NAME} took longer than {duration(limit or check.TIMEOUT)}, so Blotter "
+                                    "stopped it.", {}, [UNCHECKED])
 
 
 def duration(seconds) -> str:

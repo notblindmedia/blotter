@@ -2,6 +2,7 @@
 "Deep check still running…", and is updated when capa finishes. Engine detections never wait for it,
 and the false-alarm test waits for the final answer."""
 
+import os
 import sys
 import tempfile
 import threading
@@ -10,13 +11,16 @@ import types
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 from blotter import config
 from blotter.cache import Cache
 from blotter.checks import capabilities
-from blotter.findings import CLEAR, MALICIOUS, Finding, detected, risky
+from blotter.findings import CLEAR, MALICIOUS, NOTE, SIGNED, UNSIGNED, Finding, detected, risky
 from blotter.runner import Runner
 from blotter.trust import TrustList
+from blotter.verdict import decide
+from tests import samples
 from tests.test_runner_app import copy_file, fake_check, wait_done
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -48,6 +52,58 @@ class DeepCheckTests(unittest.TestCase):
         self.assertTrue(capabilities.BACKGROUND)
         self.assertEqual(capabilities.TIMEOUT, 15 * 60)
         self.assertLess(capabilities.CAPA_TIMEOUT, capabilities.TIMEOUT)
+
+    def test_a_well_known_publishers_program_gets_5_minutes(self):
+        """The Doctor (after N7): 5 minutes for well-known publishers' programs, unsigned/unknown keep 15."""
+        google = Finding("signature", CLEAR, "Signed.", {"trusted_publisher": "Google LLC"}, [SIGNED])
+        other = Finding("signature", CLEAR, "Signed.", {"signed_by": "Some Small Company"}, [SIGNED])
+        unsigned = Finding("signature", NOTE, "It isn't signed.", {}, [UNSIGNED])
+        inside = Finding("archive", CLEAR, "Signed.", {"trusted_publisher": "Google LLC", "scope": "a.exe"}, [SIGNED])
+        self.assertEqual(capabilities.time_limit([google]), 5 * 60)
+        for findings in ([other], [unsigned], [inside], []):
+            self.assertEqual(capabilities.time_limit(findings), 15 * 60)
+
+    def test_capa_stops_itself_within_the_limit_the_worker_passes(self):
+        path = copy_file()
+        path.write_bytes(samples.minimal_pe())
+        for limit, minutes in (("300", "5 minutes"), (None, "15 minutes")):
+            env = {"BLOTTER_TIME_LIMIT": limit} if limit else {}
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch.object(capabilities.procs, "run", return_value=(None, b"", b"")) as run, \
+                    mock.patch.object(capabilities.config, "CAPA_RULES", Path(__file__).parent):
+                if not limit:
+                    os.environ.pop("BLOTTER_TIME_LIMIT", None)
+                found = capabilities.scan(path)
+            self.assertEqual(run.call_args.kwargs["timeout"], int(limit or 900) - 15)
+            self.assertIn(f"within {minutes}", found[0].text)
+        google = Finding("signature", CLEAR, "Signed.", {"trusted_publisher": "Google LLC"}, [SIGNED])
+        self.assertEqual(decide([google, *found])["verdict"], "deep_check_unfinished")
+
+    def test_the_runner_waits_for_the_signature_then_uses_the_shorter_limit(self):
+        """Scaled down: 1 second instead of 5 minutes, 3 instead of 15. The signature check is a little slow, so
+        the deep check must wait for it before picking its limit."""
+        def stand_in_capa():
+            never = threading.Event()
+            return types.SimpleNamespace(
+                ID="capa", NAME="Abilities (capa)", ORDER=55, TIMEOUT=3, CACHE=False, NEEDS_FILE=False,
+                BACKGROUND=True, LIMIT_AFTER=("signature",), scan=lambda path: never.wait(10) and [],
+                time_limit=lambda findings: 1 if capabilities.time_limit(findings) == capabilities.TRUSTED_TIMEOUT else 3)
+
+        google = [Finding("signature", CLEAR, "Signed by Google LLC.", {"trusted_publisher": "Google LLC"}, [SIGNED])]
+        unsigned = [Finding("signature", NOTE, "It isn't signed.", {}, [UNSIGNED])]
+        for signature, verdict, most in ((google, "deep_check_unfinished", 2.5), (unsigned, "couldnt_fully_check", 5)):
+            runner = Runner(self.cache, [fake_check("fast"), fake_check("signature", delay=0.4, ret=signature),
+                                         stand_in_capa()])
+            started = time.monotonic()
+            job = wait_done(runner.start(copy_file(), "setup.exe", 4, "s" * 64), 10)
+            took = time.monotonic() - started
+            self.assertEqual(job.verdict["verdict"], verdict, job.verdict)
+            self.assertLess(took, most)
+            if signature is google:
+                self.assertEqual(job.verdict["title"], "Signed by Google LLC, deep check couldn't finish")
+                self.assertTrue(any("took longer than 1 seconds" in r for r in job.verdict["reasons"]))
+            else:
+                self.assertGreater(took, 2.9)
 
     def test_card_shows_first_then_updates(self):
         release = threading.Event()

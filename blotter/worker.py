@@ -65,7 +65,7 @@ def run(module: str, path, name, sha256, timeout: float, sandboxed=True, passwor
     try:
         request = workdir / "request.json"
         request.write_text(json.dumps({"module": module, "path": str(path), "name": name, "sha256": sha256,
-                                       "password": password}), encoding="utf-8")
+                                       "password": password, "time_limit": timeout}), encoding="utf-8")
         start = time.monotonic()
         if sandboxed:
             sandbox.prepare()
@@ -103,6 +103,8 @@ def main() -> None:
             raise ValueError("not a Blotter check")
         from . import hashing
         hashing.remember(request["path"], request["sha256"], request.get("name"), request.get("password"))
+        if request.get("time_limit"):  # a check that runs a program of its own (capa) stops it before this
+            os.environ["BLOTTER_TIME_LIMIT"] = str(int(request["time_limit"]))
         module = importlib.import_module(module_name)
         findings = module.scan(request["path"])
         if not all(isinstance(f, Finding) and f.level in LEVELS for f in findings):
