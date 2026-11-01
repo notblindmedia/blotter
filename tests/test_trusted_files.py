@@ -126,9 +126,16 @@ class CatalogSignatureTests(unittest.TestCase):
         self.assertNotIn("trusted_publisher", flagged.details)
         self.assertIn("stolen", flagged.text)
 
-    def test_stolen_list_ships_empty_and_an_empty_list_works(self):
-        """Security data never comes from memory: the list waits for the intel pack (abuse.ch)."""
-        self.assertEqual(program.stolen_certificates(), {})
+    def test_shipped_stolen_list_is_abuse_ch_data_and_spares_microsoft(self):
+        """Security data never comes from memory: every shipped entry is a SHA-256 thumbprint with abuse.ch's
+        note, written by tools/intel_pack.py (an empty list works too)."""
+        text = (config.ROOT / "rules" / "stolen-certificates.txt").read_text(encoding="utf-8")
+        entries = program._listed("stolen-certificates.txt", config.ROOT / "rules")
+        if entries:
+            self.assertIn("abuse.ch", text)
+        for value, note in entries:
+            self.assertRegex(value, r"^[0-9a-f]{64}$")
+            self.assertRegex(note, r"; listed \d{4}-\d\d-\d\d$")
         copy = Path(tempfile.mkdtemp()) / "copy.blotter"
         shutil.copyfile(SYSTEM32 / "certutil.exe", copy)
         [found] = signature_check.scan(copy)

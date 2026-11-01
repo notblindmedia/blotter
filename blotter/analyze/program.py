@@ -61,15 +61,18 @@ def entropy(data: bytes) -> float:
 
 
 def signature(path) -> dict:
-    """Windows' verdict on the digital signature: {'status', 'signer', 'kind', 'serial', 'thumbprint', 'issuer'}.
+    """Windows' verdict on the digital signature: {'status', 'signer', 'kind', 'serial', 'thumbprint',
+    'sha256', 'issuer'}. 'thumbprint' is Windows' SHA-1 one; 'sha256' is what abuse.ch lists.
 
     Get-AuthenticodeSignature asks Windows' WinVerifyTrust, which checks both a signature inside the file
     and Windows' catalog files (how System32 programs like kernel32.dll are signed), so copies count too.
     """
     script = ("$s = Get-AuthenticodeSignature -LiteralPath $env:BLOTTER_SIGNED_FILE; $c = $s.SignerCertificate; "
+              "$h = ''; if ($c) { $h = [BitConverter]::ToString("
+              "[Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData)) -replace '-', '' }; "
               "[pscustomobject]@{status = [string]$s.Status; signer = [string]$c.Subject; "
               "kind = [string]$s.SignatureType; serial = [string]$c.SerialNumber; "
-              "thumbprint = [string]$c.Thumbprint; issuer = [string]$c.Issuer} | ConvertTo-Json -Compress")
+              "thumbprint = [string]$c.Thumbprint; sha256 = $h; issuer = [string]$c.Issuer} | ConvertTo-Json -Compress")
     env = {**os.environ, "BLOTTER_SIGNED_FILE": str(path)}
     command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script]
     try:
@@ -84,14 +87,14 @@ def signature(path) -> dict:
         return {"status": "Unavailable", "signer": ""}
     return {"status": result.get("status") or "Unavailable", "signer": _common_name(result.get("signer") or ""),
             "kind": result.get("kind") or "", "serial": (result.get("serial") or "").lower(),
-            "thumbprint": (result.get("thumbprint") or "").lower(),
+            "thumbprint": (result.get("thumbprint") or "").lower(), "sha256": (result.get("sha256") or "").lower(),
             "issuer": _common_name(result.get("issuer") or "")}
 
 
-def _listed(name: str) -> list[tuple[str, str]]:
-    """(value, note) pairs from a list in rules/: one value per line, # starts a note."""
+def _listed(name: str, folder=None) -> list[tuple[str, str]]:
+    """(value, note) pairs from a list in rules/ (or `folder`): one value per line, # starts a note."""
     try:
-        lines = (config.OWN_RULES / name).read_text(encoding="utf-8").splitlines()
+        lines = ((folder or config.OWN_RULES) / name).read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     out = []
@@ -103,9 +106,11 @@ def _listed(name: str) -> list[tuple[str, str]]:
 
 
 def stolen_certificates() -> dict:
-    """{serial or thumbprint (lower-case hex): note} from rules/stolen-certificates.txt (may be empty)."""
+    """{serial or thumbprint (lower-case hex): note} from rules/stolen-certificates.txt plus the intel pack's
+    newer copy in %LOCALAPPDATA%\\Blotter\\intel (blotter/intel.py). The pack can add entries, never remove one."""
+    from ..intel import folder
     return {value.replace(" ", "").replace(":", "").lower(): note
-            for value, note in _listed("stolen-certificates.txt")}
+            for where in (folder(), None) for value, note in _listed("stolen-certificates.txt", where)}
 
 
 def well_known_publishers() -> set:
@@ -204,14 +209,16 @@ def signature_findings(check, path, details=None) -> list[Finding]:
     signed = signature(path)
     details["signature"] = signed
     status, signer = signed["status"], signed["signer"]
+    # Checked whatever Windows says: a stolen certificate is often revoked or expired by the time it is listed.
+    stolen = stolen_certificates()
+    hit = next((stolen[k] for k in (signed.get("sha256"), signed.get("thumbprint"), signed.get("serial"))
+                if k and k in stolen), None)
+    if hit is not None:
+        return [detected(Finding(check, SUSPICIOUS,
+            f"It is signed as {signer or 'a publisher'}, but with a certificate known to be stolen or abused to "
+            f"sign malware ({hit or 'on Blotter list'}). Such a signature proves nothing.", details),
+            "Blotter", "stolen certificate")]
     if status == "Valid":
-        stolen = stolen_certificates()
-        hit = next((stolen[k] for k in (signed.get("serial"), signed.get("thumbprint")) if k and k in stolen), None)
-        if hit is not None:
-            return [detected(Finding(check, SUSPICIOUS,
-                f"It is signed by {signer or 'a publisher'}, but with a certificate known to be stolen and used "
-                f"for malware ({hit or 'on Blotter list'}). Such a signature proves nothing.", details),
-                "Blotter", "stolen certificate")]
         how = " (through a Windows catalog)" if signed.get("kind") == "Catalog" else ""
         if signer and " ".join(signer.split()).lower() in well_known_publishers():
             details["trusted_publisher"] = signer
