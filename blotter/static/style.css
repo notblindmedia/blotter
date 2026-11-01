@@ -46,6 +46,9 @@ a.button { display: inline-block; text-decoration: none; }
   flex: 1 1 260px; min-width: 0; font: 14px var(--mono); padding: 8px;
   color: var(--ink); background: var(--paper); border: 1px solid var(--ink); border-radius: 0;
 }
+/* Keys and archive passwords are plain text fields drawn as dots, not password fields: browsers offer to
+   save anything typed into a password field (into the user's browser or Microsoft/Google account). */
+.secret { -webkit-text-security: disc; text-security: disc; }
 .key-state { font-size: 14px; color: var(--mute); }
 .actions { display: flex; gap: 20px; align-items: center; }
 .message { min-height: 1.5em; font-size: 14px; }

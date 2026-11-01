@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -511,6 +512,21 @@ class ReleaseBuildTests(unittest.TestCase):
             f.write(b"x")
         with self.assertRaises(sign_release.Stop):
             sign_release.check_release(out / "blotter-0.3.0.json")
+
+
+# ---- the page: browsers must not offer to save keys or archive passwords ----
+
+class SecretFieldTests(unittest.TestCase):
+    def test_no_password_fields_only_masked_text_fields(self):
+        """A password-type field makes Edge and Chrome offer to save what was typed (into the user's account)."""
+        page = (ROOT / "blotter" / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertNotRegex(page, r'type="password"')
+        fields = re.findall(r"<input[^>]*>", page)
+        for name in ("key-virustotal", "key-malwarebazaar", "archive-password"):
+            [field] = [f for f in fields if f'id="{name}"' in f]
+            for attribute in ('class="secret"', 'type="text"', 'autocomplete="off"', 'data-lpignore="true"'):
+                self.assertIn(attribute, field, name)
+        self.assertIn("-webkit-text-security: disc", (ROOT / "blotter" / "static" / "style.css").read_text(encoding="utf-8"))
 
 
 # ---- setup.bat's key step ----

@@ -33,7 +33,9 @@
         <label for="key-virustotal">VirusTotal API key</label>
         <p class="hint">Sign up at virustotal.com, then open your profile menu and choose "API key".</p>
         <div class="key-line">
-          <input id="key-virustotal" type="password" spellcheck="false" placeholder="not set">
+          <input id="key-virustotal" class="secret" type="text" autocomplete="off" autocapitalize="off"
+                 spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other"
+                 placeholder="not set">
           <span class="key-state"></span>
           <button type="button" class="link remove" hidden>Remove</button>
         </div>
@@ -42,7 +44,9 @@
         <label for="key-malwarebazaar">MalwareBazaar Auth-Key</label>
         <p class="hint">Sign in at auth.abuse.ch (abuse.ch's account page) and copy your Auth-Key.</p>
         <div class="key-line">
-          <input id="key-malwarebazaar" type="password" spellcheck="false" placeholder="not set">
+          <input id="key-malwarebazaar" class="secret" type="text" autocomplete="off" autocapitalize="off"
+                 spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other"
+                 placeholder="not set">
           <span class="key-state"></span>
           <button type="button" class="link remove" hidden>Remove</button>
         </div>
@@ -123,7 +127,8 @@
       </div>
       <form id="password-form" class="path-form" autocomplete="off" hidden>
         <label for="archive-password">This archive is locked. Its password:</label>
-        <input id="archive-password" type="password" spellcheck="false">
+        <input id="archive-password" class="secret" type="text" autocomplete="off" autocapitalize="off"
+               spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other">
         <button type="submit" class="button ghost">Check with this password</button>
       </form>
       <p class="hint" id="password-hint" hidden>The password is only used for this check and isn't saved.</p>
