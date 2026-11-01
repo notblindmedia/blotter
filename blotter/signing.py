@@ -19,7 +19,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 # Base64 of each 32-byte public key. Empty means "not made yet": everything signed with it is refused.
-CODE_KEY = ""  # made on the signing PC (tools/sign-release); not yet
+CODE_KEY = "EPI4e/Noa42vIciK/Wff6TTFSQD1gDgj6gCbll79//I="  # made 2026-11-01 on the signing PC; C7FB D957 ...
 PACK_KEY = "uQaqrWYeeLub+fivxJLH+Sc4PzJ7JoSq0Z75KcqiUOo="  # made 2026-11-01; fingerprint 54E1 1404 9925 BB12 ...
 
 RELEASE = b"blotter release manifest v1\n"

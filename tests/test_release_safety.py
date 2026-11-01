@@ -90,6 +90,7 @@ class SigningTests(unittest.TestCase):
         _, public = new_key()
         self.assertRegex(signing.fingerprint(public), r"^([0-9A-F]{4} ){7}[0-9A-F]{4}$")
         self.assertEqual(signing.fingerprint(signing.PACK_KEY), "54E1 1404 9925 BB12 E7BC 6E21 7AFA 1DEE")
+        self.assertEqual(signing.fingerprint(signing.CODE_KEY), "C7FB D957 371F 719C B169 1BD4 3634 CF62")
         self.assertNotEqual(signing.CODE_KEY, signing.PACK_KEY, "one key, one job")
         self.assertNotEqual(signing.RELEASE, signing.PACK)
         with mock.patch.object(signing, "CODE_KEY", ""):
