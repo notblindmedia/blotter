@@ -48,7 +48,15 @@ def scan(path) -> list[Finding]:
     if taken:
         return [Finding(ID, ERROR, f"{taken}, so Blotter didn't send the file to it.")]
     try:
-        with open(path, "rb") as f:
+        f = open(path, "rb")
+    except OSError as e:
+        # Not ClamAV: Blotter's copy was removed or locked before ClamAV's turn. Defender's real-time protection
+        # does that to malware it finds (seen with the Doctor's EICAR test).
+        return [Finding(ID, ERROR, f"ClamAV couldn't read Blotter's copy of the file ({e.strerror or e}): something "
+                                   "removed or locked it first. Windows Defender does that when it finds malware.",
+                        {"file_gone": True})]
+    try:
+        with f:
             answer = clamav.scan_stream(f, timeout=max(60, TIMEOUT - 20 - (time.monotonic() - began)))
     except OSError as e:
         return [Finding(ID, ERROR, f"Blotter couldn't reach its ClamAV scanner ({e.strerror or e}).")]

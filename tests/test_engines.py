@@ -116,6 +116,23 @@ class ClamAVTests(unittest.TestCase):
         finally:
             fake.close()
 
+    def test_a_copy_removed_before_clamavs_turn_is_not_called_unreachable(self):
+        """The Doctor's EICAR test on the normal Blotter: Defender's real-time protection removed the copy first, and
+        the card said "Blotter couldn't reach its ClamAV scanner (No such file or directory)"."""
+        gone = Path(tempfile.mkdtemp()) / "eicar.blotter"  # never written: as if already removed
+        fake = FakeClamd()
+        try:
+            with mock.patch.object(clamav, "installed", return_value=True), \
+                 mock.patch.object(clamav, "read_state", return_value={"state": "ready", "message": ""}), \
+                 mock.patch.object(clamav, "clamd_exe", return_value=PYTHON):
+                [f] = clamav_check.scan(gone)
+            self.assertEqual(f.level, ERROR)
+            self.assertIn("ClamAV couldn't read Blotter's copy of the file (No such file or directory)", f.text)
+            self.assertNotIn("reach", f.text)
+            self.assertEqual(fake.received, b"", "nothing was sent")
+        finally:
+            fake.close()
+
     def test_failed_service_is_reported(self):
         with mock.patch.object(clamav, "installed", return_value=True), \
              mock.patch.object(clamav, "read_state", return_value={"state": "failed", "message": "no signatures"}):
