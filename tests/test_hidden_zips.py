@@ -89,7 +89,7 @@ class HiddenZipTests(unittest.TestCase):
         self.assertEqual(verdict(found), "suspicious")
 
     def test_a_clean_zip_after_a_picture_pdf_or_document_is_unusual(self):
-        """The Doctor, after round 2's N1: the headline should say a picture, PDF or document carries files."""
+        """After round 2's N1: the headline should say a picture, PDF or document carries files."""
         clean = samples.zip_of({"notes.txt": b"just text"})
         ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(1016)  # an older Word file's start
         rtf = b"{\\rtf1\\ansi Hello.}"
@@ -112,7 +112,7 @@ class HiddenZipTests(unittest.TestCase):
         self.assertEqual(verdict([*self.scan(PDF + samples.zip_of({"a.txt": b"x"})), detected]), "malicious")
 
     def test_a_clean_zip_after_an_office_opendocument_or_java_file_is_unusual(self):
-        """The Doctor: two zips where the first is really a Word, Excel, PowerPoint, OpenDocument or Java file."""
+        """Two zips where the first is really a Word, Excel, PowerPoint, OpenDocument or Java file."""
         clean = samples.zip_of({"notes.txt": b"just text"})
         firsts = {
             "docx": ({"[Content_Types].xml": "<Types/>", "word/document.xml": "<w:document/>"}, "an Office document"),
@@ -157,7 +157,7 @@ class HiddenZipTests(unittest.TestCase):
                           == "wrong-ending"])
 
     def test_a_self_running_macro_with_a_zip_glued_on_is_suspicious_and_says_why(self):
-        """The Doctor's decision: Suspicious, and the card says why."""
+        """A deliberate decision: Suspicious, and the card says why."""
         from blotter.checks import filetype as filetype_check, macros
         path = write(samples.docm() + samples.zip_of({"notes.txt": b"just text"}))
         result = decide(filetype_check.scan(path) + macros.scan(path) + archive.scan(path))
@@ -169,7 +169,7 @@ class HiddenZipTests(unittest.TestCase):
         self.assertNotIn("hidden files", result["summary"])
 
     def test_a_zip_inside_an_older_office_files_own_data_is_not_hidden(self):
-        """Round 2's N3: Steam's ThirdPartyLegalNotices.doc keeps Word's theme as a zip inside the OLE file."""
+        """Round 2's N3: an installed program's legal-notices .doc keeps Word's theme as a zip inside the OLE file."""
         theme = samples.zip_of({"[Content_Types].xml": "<Types/>", "theme/theme/theme1.xml": "<a:theme/>"})
         stream = b"Word text. " * 100 + theme
         stream += bytes(max(0, 4096 - len(stream)))  # samples._cfb wants streams of 4096 bytes or more

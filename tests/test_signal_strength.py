@@ -93,7 +93,7 @@ class ClamAVGenericTests(unittest.TestCase):
 # ---- 2. well-known publishers vs. any other valid signature ----
 
 class PublisherListTests(unittest.TestCase):
-    def test_list_has_the_doctors_publishers(self):
+    def test_list_has_the_expected_publishers(self):
         names = program.well_known_publishers()
         for name in ("microsoft windows", "microsoft corporation", "google llc", "apple inc.", "valve corp.",
                      "mozilla corporation", "nvidia corporation", "advanced micro devices, inc.", "intel corporation",

@@ -6,5 +6,5 @@ __pycache__/
 .env
 *.blotter
 *.blotted
-# private working notes (the Doctor's rule): never committed or pushed
+# private working notes: never committed or pushed
 STATUS.md

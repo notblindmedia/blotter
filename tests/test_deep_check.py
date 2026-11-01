@@ -54,7 +54,7 @@ class DeepCheckTests(unittest.TestCase):
         self.assertLess(capabilities.CAPA_TIMEOUT, capabilities.TIMEOUT)
 
     def test_a_well_known_publishers_program_gets_5_minutes(self):
-        """The Doctor (after N7): 5 minutes for well-known publishers' programs, unsigned/unknown keep 15."""
+        """After N7: 5 minutes for well-known publishers' programs, unsigned/unknown keep 15."""
         google = Finding("signature", CLEAR, "Signed.", {"trusted_publisher": "Google LLC"}, [SIGNED])
         other = Finding("signature", CLEAR, "Signed.", {"signed_by": "Some Small Company"}, [SIGNED])
         unsigned = Finding("signature", NOTE, "It isn't signed.", {}, [UNSIGNED])

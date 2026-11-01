@@ -92,7 +92,7 @@ def _open_when_ready():
 
 
 def main() -> int:
-    test_mode = "--test-mode" in sys.argv  # for Claude's test runs: no Defender check; every card says so
+    test_mode = "--test-mode" in sys.argv  # for automated test runs: no Defender check; every card says so
     state = _ping()
     if state == "blotter" and test_mode:
         print("Blotter is already running with Defender on, so it can't switch to test mode. "

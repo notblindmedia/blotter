@@ -176,7 +176,7 @@ class FailClosedTests(unittest.TestCase):
         self.assertEqual(decide([clear(), *found])["verdict"], "couldnt_fully_check")
 
     def test_h2_capa_out_of_memory_is_a_limit(self):
-        """Round 2's MemoryError and this PC's Once Human DLLs: capa hit Blotter's memory limit (seen 2026-10-29)."""
+        """Round 2's MemoryError and a game's DLLs: capa hit Blotter's memory limit (seen 2026-10-29)."""
         rust = b"WARNING  capa.rules: skipping non-.yml file: .version\nmemory allocation of 170800 bytes failed\n" \
                b"note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"
         for stderr, code in ((rust, 0xC0000409), (b"Traceback (most recent call last):\n  File x\nMemoryError\n", 1)):

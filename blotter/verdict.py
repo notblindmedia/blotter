@@ -100,7 +100,7 @@ _WHY = {
     UNKNOWN_ONLINE: "VirusTotal has never seen this file",
 }
 # Said instead of HIDING's reason when an Office file's self-running macro and a zip glued after it are in the same
-# file (the Doctor's decision: Suspicious).
+# file (a deliberate decision: Suspicious).
 MACRO_DROP = ("it also hides files in a zip glued after the document: a macro that runs by itself plus hidden files "
               "is a common way to drop malware")
 AUTORUN = {"macro-autorun", "macro-autorun-exec"}

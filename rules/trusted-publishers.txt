@@ -9,7 +9,7 @@
 # "It is digitally signed by ..."). Upper/lower case doesn't matter. # starts a note.
 # Blotter reads this file on every check, so edits apply right away.
 #
-# "seen" = this exact spelling was read from real signed files on Inkwell (2026-10-29).
+# "seen" = this exact spelling was read from real signed files (2026-10-29).
 # The others are the usual spellings, not yet seen on a real file here: if a program from that
 # company still shows as "not on the list", copy the name from its card into this file.
 
@@ -59,10 +59,10 @@ Python Software Foundation       # seen
 # Git for Windows: its releases are signed by its maintainer
 Johannes Schindelin              # seen (Git for Windows installer and git.exe)
 
-# Added by the Doctor's choice (2026-10-29), spellings read from the real files on Inkwell.
-Tailscale Inc.                   # seen (tailscale.exe, tailscale-ipn.exe, the installer)
-OpenJS Foundation                # seen (Node.js: node.exe)
-Roblox Corporation               # seen (RobloxStudioInstaller.exe)
-Anthropic, PBC                   # seen (ClaudeSetup.exe)
-Dynalist Inc                     # seen (Obsidian.exe; Obsidian's company)
-NetEase (Hangzhou) Network Co., Ltd   # seen (Once Human: ONCE_HUMAN.exe and its NtUniSdk DLLs)
+# Added 2026-10-29, spellings read from real signed files.
+Tailscale Inc.                   # seen
+OpenJS Foundation                # seen (Node.js)
+Roblox Corporation               # seen
+Anthropic, PBC                   # seen
+Dynalist Inc                     # seen (the company behind Obsidian)
+NetEase (Hangzhou) Network Co., Ltd   # seen

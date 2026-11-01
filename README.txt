@@ -312,7 +312,7 @@ USING IT
    only reopens the page of the running, older Blotter. The page notices
    this and says "Blotter was updated while it was running".
 
-7. Test mode, for test runs (Claude's sessions always use it):
+7. Test mode, for test runs (automated test runs always use it):
    "Start Blotter.bat" --test-mode (or python -m blotter --test-mode).
    The Microsoft Defender check is left out, every card says "Test mode:
    Defender off", and the EICAR button is hidden. It refuses to start

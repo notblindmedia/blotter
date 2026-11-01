@@ -117,7 +117,7 @@ class ClamAVTests(unittest.TestCase):
             fake.close()
 
     def test_a_copy_removed_before_clamavs_turn_is_not_called_unreachable(self):
-        """The Doctor's EICAR test on the normal Blotter: Defender's real-time protection removed the copy first, and
+        """An EICAR test on the normal Blotter: Defender's real-time protection removed the copy first, and
         the card said "Blotter couldn't reach its ClamAV scanner (No such file or directory)"."""
         gone = Path(tempfile.mkdtemp()) / "eicar.blotter"  # never written: as if already removed
         fake = FakeClamd()

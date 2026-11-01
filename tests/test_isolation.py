@@ -143,7 +143,7 @@ class LowIntegrityFallbackTests(unittest.TestCase):
     def test_fallback_runs_and_cannot_write_to_normal_folders(self):
         sandbox._state.update(mode="low-integrity", sid=None, why="test")
         if not sandbox._works():
-            # On the Doctor's PC the Inkwell folder refuses low-integrity readers, so Blotter skips this
+            # On some PCs the project folder refuses low-integrity readers, so Blotter skips this
             # level there; prepare() then picks the job box. Nothing more to test on such a PC.
             self.skipTest("a low-integrity worker can't read the Blotter folder on this PC")
         [ran] = worker.run("blotter.checks._probe", probe_file(b"hello"), "x", "0" * 64, timeout=60)

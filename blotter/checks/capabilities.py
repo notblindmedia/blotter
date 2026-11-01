@@ -108,7 +108,7 @@ ERROR_LINE = re.compile(r"^\s*(?:\w+\.)*\w*(?:Error|Exception|Exit)\b.*", re.M)
 OUT_OF_MEMORY = re.compile(r"\bMemoryError\b|memory allocation of \d+ bytes failed")
 # Lines that never say what went wrong: warnings, rulers of dashes, hints.
 NOISE = re.compile(r"^\s*(?:WARNING\b|note:|[-=_\s]*$)", re.I)
-# Windows' exit codes for a process that crashed (seen: capa's stack overflow on a Once Human DLL, 2026-10-29).
+# Windows' exit codes for a process that crashed (seen: capa's stack overflow on a game's DLL, 2026-10-29).
 NO_MEMORY = 0xC0000017
 CRASHES = {0xC00000FD: "stack overflow", 0xC0000005: "access violation"}
 LIMITATION = re.compile(r"^internal/limitation")

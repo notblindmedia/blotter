@@ -53,7 +53,7 @@ starts. Double-click <b>Start Blotter.bat</b> again; it opens this page with the
 
 
 def create_app(checks=None, cache=None, trust=None, token=None, test_mode=False) -> FastAPI:
-    """test_mode (--test-mode, for Claude's test runs): the Defender check is left out and every card says so."""
+    """test_mode (--test-mode, for automated test runs): the Defender check is left out and every card says so."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = token or secrets.token_urlsafe(32)  # new every start; see __main__.py
     app.state.token = token

@@ -1,4 +1,4 @@
-"""The harmless test files must be caught. Defender is stubbed (the real Defender tests are the Doctor's).
+"""The harmless test files must be caught. Defender is stubbed (real Defender tests are run by hand).
 
 EICAR and the obfuscated script stay in memory: written to disk, they could set off Defender
 during a test run. The renamed program and the Word document go through the full runner.

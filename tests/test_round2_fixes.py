@@ -1,6 +1,7 @@
 """The rest of round 2's fixes: minified vs. obfuscated JavaScript, ClamAV only while it is needed, several dropped
 files at once, and the capa line naming the weak sign that made a program Unusual."""
 
+import os
 import tempfile
 import threading
 import time
@@ -19,11 +20,9 @@ from blotter.verdict import decide
 from tests.test_runner_app import copy_file, fake_check, wait_done
 from tests.test_session import STATIC, client_for, make_app
 
-LENOVO = Path(r"C:\ProgramData\Lenovo\Vantage\WebApps\consumer")
-REPORT_ZIPS = [LENOVO / p for p in (  # the 6 round 2 called Suspicious (parts 1 and 4)
-    r"Packages\hardwarescanv2\2.15.2607017\vtr-ui-hardwarescanv2.zip", r"Packages\supportv2\1.1.2606011\vtr-ui-supportv2.zip",
-    r"vtr-ui-gaming.zip", r"Packages\ai\25.0.1105\vtr-ui-ai.zip", r"Packages\consumer\26.0.1008\vtr-ui-consumer.zip",
-    r"vtr-ui-rainbow.zip")]
+# A folder of real web-app zips (minified JavaScript) that round 2 called Suspicious. Set BLOTTER_TEST_WEBAPP_ZIPS to it
+# to run test_real_web_app_zips; without it the test is skipped.
+WEBAPP_ZIPS = os.environ.get("BLOTTER_TEST_WEBAPP_ZIPS")
 
 
 def js(text):
@@ -89,10 +88,10 @@ class MinifiedJavaScriptTests(unittest.TestCase):
                                      "ps1")
         self.assertIn("char codes", found[0].details["tricks"])
 
-    def test_lenovo_vantage_web_app_zips(self):
-        present = [p for p in REPORT_ZIPS if p.is_file()]
+    def test_real_web_app_zips(self):
+        present = sorted(Path(WEBAPP_ZIPS).rglob("*.zip"))[:20] if WEBAPP_ZIPS else []
         if not present:
-            self.skipTest("Lenovo Vantage isn't on this PC")
+            self.skipTest("BLOTTER_TEST_WEBAPP_ZIPS isn't set to a folder with zips")
         for path in present:
             v = decide([Finding("filetype", CLEAR, "A zip."), *archive.scan(path)])
             self.assertEqual(v["verdict"], "no_known_detections", (path.name, v["reasons"][:4]))
