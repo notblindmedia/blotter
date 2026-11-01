@@ -6,6 +6,8 @@ __pycache__/
 .env
 *.pem
 tools/sign-release/blotter-release-key.*
+tools/sign-release/.deps/
+tools/sign-release/python-path.txt
 *.blotter
 *.blotted
 # private working notes: never committed or pushed

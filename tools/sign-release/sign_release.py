@@ -18,11 +18,13 @@ import re
 import sys
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE / ".deps"))  # sign-release.bat installs the pinned packages there
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (BestAvailableEncryption, Encoding, PrivateFormat,
                                                           PublicFormat, load_pem_private_key)
 
-HERE = Path(__file__).resolve().parent
 KEY_FILE = HERE / "blotter-release-key.pem"
 PUBLIC_FILE = HERE / "blotter-release-key.pub.txt"
 RELEASE = b"blotter release manifest v1\n"  # must equal RELEASE in Blotter's blotter\signing.py
@@ -62,6 +64,8 @@ def new_key(key_file=KEY_FILE, ask=getpass.getpass) -> str:
 
 def check_release(manifest_path: Path) -> tuple[bytes, dict]:
     """The manifest's bytes and contents, after checking the zip next to it matches."""
+    if not manifest_path.is_file():
+        raise Stop(f"there is no file {manifest_path}")
     data = manifest_path.read_bytes()
     m = json.loads(data.decode("utf-8"))
     if m.get("kind") != "blotter-release" or m.get("format") != 1:

@@ -5,9 +5,18 @@ friend's PC installs a new Blotter only if this key signed it. The key's
 private half stays on this PC (and your offline backup), never on the PC
 that builds the releases.
 
-What you need: Windows, 64-bit, Python 3.12 (https://www.python.org).
-The first run makes a private Python folder (.venv) here and installs one
-package, cryptography, at a pinned version with a checked checksum.
+What you need: Windows, 64-bit Python 3.12 with pip. An installed Python
+or a portable one (for example the NuGet package) both work. The kit
+looks for it in this order and uses the first that really is 3.12:
+  1. BLOTTER_PYTHON, if you set it in the window first:
+         set BLOTTER_PYTHON=D:\Python312\python.exe
+  2. the Python it used last time (remembered in python-path.txt here,
+     so dragging a file onto sign-release.bat works later),
+  3. python on PATH, 4. the py launcher, 5. the standard install folder.
+The first run installs cryptography and its two helpers (cffi,
+pycparser) into a .deps folder here, at the exact versions in
+requirements.txt; pip refuses any file whose checksum doesn't match and
+runs no build scripts. Nothing outside this folder changes.
 
 
 ONCE: MAKE THE RELEASE KEY
