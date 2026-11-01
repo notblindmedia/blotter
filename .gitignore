@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 # never commit keys or scanned files
 .env
+*.pem
+tools/sign-release/blotter-release-key.*
 *.blotter
 *.blotted
 # private working notes: never committed or pushed
