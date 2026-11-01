@@ -6,6 +6,9 @@
 - YARA Forge "core" rules: the newest weekly release; the checksum comes from GitHub's release data.
 - capa rules and library signatures: the version that matches the installed capa, pinned by checksum.
 - ClamAV: a fixed version, pinned by checksum. Its signatures then update daily through ClamAV's own freshclam.
+- The intel pack (blotter/intel.py): data lists signed with the pack key.
+Blotter's own code is never updated from here: that is update.bat's job (blotter/selfupdate.py), and only
+when you say yes.
 """
 
 import hashlib
@@ -150,12 +153,14 @@ def clamav() -> str:
 
 
 def rules(force=False) -> list[str]:
-    """YARA Forge (force: even if less than a week old) + capa (only if missing or the wrong version).
-    Returns one line per part; failures are reported, not raised."""
+    """YARA Forge (force: even if less than a week old) + capa (only if missing or the wrong version) + the
+    signed intel pack (data lists, at most once a day). Returns one line per part; failures are reported, not raised."""
     done = []
+    from . import intel
     from .analyze import yararules
     yararules.migrate()
-    for name, job in (("YARA Forge", lambda: yara_forge(force)), ("capa", capa)):
+    for name, job in (("YARA Forge", lambda: yara_forge(force)), ("capa", capa),
+                      ("Intel pack", lambda: intel.refresh(force))):
         try:
             done.append(job())
         except (UpdateError, OSError, ValueError, zipfile.BadZipFile) as e:

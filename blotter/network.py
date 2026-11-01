@@ -16,8 +16,8 @@ LOOKUPS = {
 }
 
 DOWNLOADS = {
-    "api.github.com": "finds the newest YARA Forge rules release and its checksum",
-    "github.com": "YARA Forge rules and the ClamAV program (release downloads)",
+    "api.github.com": "finds the newest YARA Forge rules release and its checksum, and Blotter's own releases",
+    "github.com": "YARA Forge rules, the ClamAV program, Blotter's signed releases and intel pack (release downloads)",
     "release-assets.githubusercontent.com": "GitHub's file storage behind those downloads",
     "objects.githubusercontent.com": "GitHub's older file storage behind those downloads",
     "codeload.github.com": "capa's rules (a fixed version, checked by checksum)",
@@ -29,6 +29,7 @@ DOWNLOADS = {
 LINKS = {
     "www.virustotal.com": "the file's page on VirusTotal (the fingerprint is in the address)",
     "bazaar.abuse.ch": "the file's page on MalwareBazaar",
+    "auth.abuse.ch": "where you get a MalwareBazaar key (named by setup.bat's key step)",
 }
 
 ALLOWED = set(LOOKUPS) | set(DOWNLOADS)
