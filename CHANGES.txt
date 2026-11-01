@@ -4,11 +4,13 @@ Newest first. update.bat shows the notes for the version it offers.
 A version starts with its number alone on a line (for example 1.0.0), then
 one "- " line per change. "next" collects changes until the next release.
 
-next
+0.9.0
+- First release for friends (a beta: tell me what was unclear).
 - Releases are signed. update.bat installs a newer Blotter only if the
   release key signed it, and never an older version than the one you have.
 - A program signed with a certificate abuse.ch lists as stolen or abused
-  for malware gets no publisher trust and is at least Suspicious.
+  for malware gets no publisher trust and is at least Suspicious
+  (474 certificates in this release).
 - The intel pack: signed lists (for now the stolen certificates) that
   Blotter fetches between releases. Data only, never code.
 - setup.bat works from a downloaded zip (no Git), offers the API keys

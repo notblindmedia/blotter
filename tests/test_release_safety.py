@@ -20,6 +20,7 @@ from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import blotter
 from blotter import config, intel, keysetup, selfupdate, signing
 from blotter.analyze import program
 from blotter.checks import signature as signature_check
@@ -472,8 +473,9 @@ class ReleaseBuildTests(unittest.TestCase):
             make_release.build(repo, Path(tempfile.mkdtemp()))
 
     def test_real_changes_file_parses(self):
+        """CHANGES.txt has notes for the version in blotter/__init__.py, or a "next" section between releases."""
         text = (ROOT / "CHANGES.txt").read_text(encoding="utf-8")
-        self.assertTrue(make_release.changes(text, "next"))
+        self.assertTrue(make_release.changes(text, blotter.__version__) or make_release.changes(text, "next"))
 
     def test_kit_key_signs_and_update_bat_accepts_end_to_end(self):
         kit = Path(tempfile.mkdtemp())
