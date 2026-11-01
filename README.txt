@@ -16,6 +16,59 @@ It runs on your own Windows 10 or 11 PC. It never needs admin rights.
 Nothing is installed system-wide except Python.
 
 
+QUICK START (NEW HERE? READ ONLY THIS PART)
+
+You need: a Windows 10 or 11 PC, an internet connection, about 1 GB of
+free space, and 15 minutes. No Git, no programming.
+
+1. Get Blotter.
+   Open https://github.com/notblindmedia/blotter/releases in your browser.
+   Under the newest release, click "blotter-X.Y.Z.zip" (X.Y.Z is the
+   version number) to download it. Only use the zip from that page.
+
+2. Unpack it.
+   Right-click the downloaded zip, choose "Extract All...", pick a place
+   you will find again (for example your Documents folder), click
+   "Extract". You get a folder called blotter-X.Y.Z. Open it.
+
+3. Set it up (once).
+   Double-click setup.bat. A black window opens and asks a few questions:
+   - "Install Python 3.12 now?" (only if it is missing): press Y.
+     If Windows asks whether to allow it, say yes.
+   - "Add keys now (Y) or skip (S)": press S if you are not sure. The keys
+     are optional and free; see SETUP (ONCE) below if you want them.
+   - "Set up ClamAV now?": Y gives you a second antivirus engine (it needs
+     about 350 MB and some memory while Blotter runs). N is fine too.
+   At the end it shows two "fingerprints" (8 groups of 4 letters and
+   numbers). If the person who gave you Blotter sent you fingerprints,
+   compare them: every character must be the same. If they differ, stop
+   and ask them before using Blotter.
+   Then press a key to close the window.
+   Windows may warn that the file came from the internet. Check that the
+   warning names setup.bat in your blotter-X.Y.Z folder, then choose
+   "Run" (on a blue "Windows protected your PC" box: "More info", then
+   "Run anyway"). Do that only for the files in this folder.
+
+4. Use it.
+   Double-click "Start Blotter.bat". Your browser opens Blotter. Drop a
+   file on the page and read the answer. Keep the black window open while
+   you use Blotter; close it when you are done.
+
+5. Keep it up to date.
+   Now and then, close Blotter and double-click update.bat. It looks for a
+   newer version, shows what changed and asks before installing. It only
+   installs versions signed with Blotter's release key, never an older
+   one, and never anything without asking. Your settings, keys and
+   trusted files stay. (A list you edited yourself in the rules folder is
+   replaced by the new version's.)
+   The rules (YARA Forge, weekly) and the intel pack (lists of stolen
+   certificates, daily) refresh when Blotter starts and they are due;
+   those are data, not programs, and are checked before use.
+
+Something went wrong? The black window says what. Run setup.bat again;
+it repairs what is missing and keeps what works.
+
+
 WHAT BLOTTER DOES WITH YOUR FILE
 
 Blotter never opens, runs or imports the file. It only reads its bytes, and
@@ -104,11 +157,13 @@ the sandbox.
      Obsidian, NetEase). Any other valid signature counts for
      a little: it forgives one warning sign, no more, because any company
      can buy a signing certificate. Engine detections that name malware are
-     never quieted, and a certificate on the stolen list
-     (rules\stolen-certificates.txt) counts as a warning, not as trust. That
-     list starts empty: it will be filled from abuse.ch's blocklist of
-     abused code-signing certificates by the weekly update (planned), never
-     from memory.
+     never quieted. A program signed with a certificate on the stolen list
+     gets no trust at all and is at least Suspicious, whatever Windows says
+     about the signature (stolen certificates are often revoked or expired
+     by then). The list is abuse.ch's blocklist of stolen and abused
+     code-signing certificates, never typed from memory: a copy ships in
+     rules\stolen-certificates.txt, and the signed intel pack adds newer
+     entries between releases (it can add entries, never remove one).
    - Office documents: macros (with oletools), auto-run macros, scrambled
      macro code, documents that fetch content from the internet.
    - RTF documents (oletools' rtfobj): the objects embedded in them. RTF
@@ -232,15 +287,20 @@ Blotter never calls a file "safe".
 
 SETUP (ONCE)
 
-1. Double-click setup.bat.
+1. Double-click setup.bat. It works in a folder unpacked from a release
+   zip; Git isn't needed.
    - If Python 3.12 isn't installed, it offers to install it with winget.
    - It makes a private Python folder (.venv) inside the Blotter folder and
      installs exact, checksum-verified, ready-made versions of the parts
      Blotter needs (listed in requirements.txt). No build scripts run.
    - It downloads the rules (YARA Forge and capa, a few MB, checked by
-     checksum).
+     checksum) and the signed intel pack.
+   - It offers the API keys: Y to paste them (they aren't shown while you
+     paste; just Enter skips one), S to skip.
    - It asks whether to set up ClamAV (about 225 MB once, plus about 110 MB
      of signatures). Say N to skip; you can run setup.bat again later.
+   - It shows the fingerprints of Blotter's two signing keys (see UPDATES
+     AND SIGNATURES).
 
 2. API keys are optional. Blotter works without them; only the VirusTotal
    and MalwareBazaar answers are missing. If you want them:
@@ -248,6 +308,37 @@ SETUP (ONCE)
      menu and choose "API key".
    - MalwareBazaar: sign in at https://auth.abuse.ch and copy your
      "Auth-Key".
+   Paste them in setup.bat, in Blotter's first-start page, or later under
+   Settings.
+
+
+UPDATES AND SIGNATURES
+
+Blotter's own program is only ever replaced by update.bat, and only when
+you say yes. It never updates its code by itself.
+
+- Every release is signed with Blotter's release key, an Ed25519 key that
+  is kept offline on one PC and never on the PC that builds the releases.
+  The public half is built into Blotter (blotter\signing.py).
+- update.bat asks GitHub for the newest release, downloads its small
+  signed manifest and checks the signature. It refuses a release that
+  isn't signed, one whose signature or zip doesn't match (tampered), and
+  any version that isn't newer than yours. Then it shows what changed and
+  asks before downloading and installing anything.
+- It replaces the program folders and files, keeps your .venv, settings,
+  keys, cache and trusted files, and keeps the old version in .update-old
+  until the next update. If the new version needs other packages, it
+  installs them with the same checksum checks as setup.bat.
+- The intel pack is signed with a second key, the pack key, which can only
+  sign data: Blotter accepts from a pack nothing but plain lists it checks
+  line by line (for now the stolen-certificate list), never an older pack
+  than the one it has, and never code. A pack that fails a check is
+  refused and the lists you have stay.
+- Fingerprints: setup.bat shows both keys' fingerprints (8 groups of 4).
+  Compare them with the ones the person who gave you Blotter sent you.
+  Honest limit: if your first download was itself tampered with, it could
+  print false fingerprints; comparing protects you best when the
+  fingerprints reach you another way (a message from that person).
 
 
 USING IT
@@ -430,11 +521,16 @@ WHERE THINGS ARE
 
 - The program: this folder. "blotter" holds the code, "blotter\checks"
   has one file per check, "blotter\analyze" the shared readers, "rules" our
-  own YARA rules, "tools" the test helpers.
+  own YARA rules, "tools" the test helpers (and, in the Git copy only,
+  the release and intel pack tools).
 - Remembered answers: %LOCALAPPDATA%\Blotter\cache.sqlite3
   (delete it to forget them).
 - Trusted files: %LOCALAPPDATA%\Blotter\trusted.sqlite3
 - Settings: %LOCALAPPDATA%\Blotter\settings.json (no secrets in it).
+- The intel pack's lists: %LOCALAPPDATA%\Blotter\intel (pack.json says
+  which pack is installed).
+- The previous version after an update: .update-old in this folder (you
+  can delete it).
 - Quarantine: %LOCALAPPDATA%\Blotter\quarantine
 - Downloaded rules: %LOCALAPPDATA%\Blotter\rules ; ClamAV: ...\clamav and
   ...\clamav-db
@@ -467,7 +563,9 @@ Lookups (only the file's fingerprint is sent):
   hashlookup.circl.lu     CIRCL hashlookup (no key)
 Downloads (send nothing about your files):
   api.github.com, github.com, release-assets.githubusercontent.com,
-  objects.githubusercontent.com   YARA Forge rules, the ClamAV program
+  objects.githubusercontent.com   YARA Forge rules, the ClamAV program,
+                                  Blotter's signed releases (update.bat)
+                                  and intel pack
   codeload.github.com, raw.githubusercontent.com   capa rules and signatures
   database.clamav.net     ClamAV's daily signatures (through freshclam)
 
@@ -513,3 +611,26 @@ Updating packages:
   command-line tool Blotter doesn't use.
 - capa's rules and signatures are pinned to the capa version (9.4.0) in
   blotter\updates.py; update them together with flare-capa.
+
+Making a release (nothing is published by these steps alone):
+1. Set __version__ in blotter\__init__.py, rename CHANGES.txt's "next"
+   section to that version, commit.
+2. .venv\Scripts\python tools\make_release.py
+   Builds blotter-X.Y.Z.zip from the committed files only (no tests, no
+   developer tools, no STATUS.md) and blotter-X.Y.Z.json, the manifest.
+   The same commit always gives the same zip.
+3. On the PC that holds the release key: drag the .json onto
+   tools\sign-release\sign-release.bat (see the README.txt there). It
+   checks the zip, shows what changed, and writes blotter-X.Y.Z.json.sig.
+4. Publish a GitHub release tagged vX.Y.Z with the zip, the .json and the
+   .json.sig.
+
+The intel pack:
+- .venv\Scripts\python tools\intel_pack.py stolen-list
+  refills rules\stolen-certificates.txt from abuse.ch (with the
+  MalwareBazaar key from Blotter's keys).
+- .venv\Scripts\python tools\intel_pack.py build
+  fetches the same list and signs a pack with the pack key (kept in
+  Windows Credential Manager as "Blotter intel pack", never in a file).
+  Upload intel-pack.json and intel-pack.json.sig to the GitHub release
+  tagged intel-pack, replacing the old ones. Weekly, by hand.

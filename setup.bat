@@ -60,12 +60,21 @@ echo  Installing packages (this takes a few minutes the first time) ...
     --require-hashes --only-binary=:all: --no-deps -r requirements.txt
 if errorlevel 1 goto failed
 
-rem --- 4. Rules: YARA Forge and capa (a few MB, checked by checksum) -----
+rem --- 4. Rules: YARA Forge, capa and the signed intel pack (a few MB, checked) ---
 echo.
-echo  Downloading the rules Blotter uses (YARA Forge, capa) ...
+echo  Downloading the rules Blotter uses (YARA Forge, capa, intel pack) ...
 ".venv\Scripts\python.exe" -m blotter.updates
 
-rem --- 5. ClamAV (optional) ----------------------------------------------
+rem --- 5. API keys (optional) ----------------------------------------------
+echo.
+echo  VirusTotal and MalwareBazaar keys are optional. Blotter works without them;
+echo  only those two answers are missing. They are free; README.txt says where to get them.
+choice /c YS /m " Add keys now (Y) or skip (S)"
+if errorlevel 2 goto keys_done
+".venv\Scripts\python.exe" -m blotter.keysetup
+:keys_done
+
+rem --- 6. ClamAV (optional) ----------------------------------------------
 echo.
 echo  ClamAV is a second antivirus engine that runs only while Blotter is open.
 echo  It downloads about 225 MB once, plus about 110 MB of signatures, and uses
@@ -76,8 +85,16 @@ if errorlevel 2 goto done
 
 :done
 
+rem --- 7. The signing keys' fingerprints ----------------------------------
+echo.
+echo  Blotter's signing keys. update.bat only installs releases signed with the
+echo  release key. If the person who gave you Blotter sent you these numbers,
+echo  check they are exactly the same:
+".venv\Scripts\python.exe" -m blotter.signing
+
 echo.
 echo  Setup finished. Double-click "Start Blotter.bat" to use Blotter.
+echo  To get a newer version later, double-click update.bat.
 echo.
 pause
 exit /b 0
