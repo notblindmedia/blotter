@@ -5,6 +5,10 @@ friend's PC installs a new Blotter only if this key signed it. The key's
 private half stays on this PC (and your offline backup), never on the PC
 that builds the releases.
 
+Keep this folder, the key and the Python it uses in a folder no Claude
+session works in. Whatever runs while you sign sees the unlocked key, so
+a program that can change the kit or its Python could copy it.
+
 What you need: Windows, 64-bit Python 3.12 with pip. An installed Python
 or a portable one (for example the NuGet package) both work. The kit
 looks for it in this order and uses the first that really is 3.12:
@@ -21,7 +25,8 @@ runs no build scripts. Nothing outside this folder changes.
 
 ONCE: MAKE THE RELEASE KEY
 
-1. Copy this folder to the main PC (for example Documents\blotter-signing).
+1. Copy this folder to the main PC, into a folder no Claude session
+   works in.
 2. Open a Command Prompt in it and type:
        sign-release.bat new-key
 3. Choose a passphrase of at least 12 characters and type it twice. Nobody
@@ -34,13 +39,21 @@ ONCE: MAKE THE RELEASE KEY
    copies of Blotter can't accept new releases any more.
    Never copy blotter-release-key.pem to the Blotter PC or anywhere online.
 
+The kit looks for blotter-release-key.pem in its own folder. If you keep
+the key somewhere else (another folder, a USB stick), tell the kit where,
+in the Command Prompt window, before signing:
+       set BLOTTER_RELEASE_KEY=E:\keys\blotter-release-key.pem
+That setting lasts only for that window, so then sign from the same
+window (step 2 below, typed instead of dragged).
+
 
 EVERY RELEASE: SIGN IT
 
 1. Claude prepares two files on the Blotter PC: blotter-X.Y.Z.zip and
    blotter-X.Y.Z.json (the manifest: version, the zip's checksum, what
    changed). Copy both into one folder on this PC.
-2. Drag blotter-X.Y.Z.json onto sign-release.bat.
+2. Drag blotter-X.Y.Z.json onto sign-release.bat, or type in the window:
+       sign-release.bat "D:\path\to\blotter-X.Y.Z.json"
 3. It checks that the zip matches the manifest, shows the version and what
    changed, and asks. Type y, then the passphrase.
 4. It writes blotter-X.Y.Z.json.sig next to the manifest.

@@ -4,8 +4,9 @@
     sign-release.bat blotter-X.Y.Z.json  check the zip next to it and sign the manifest (or drag the .json
                                          onto sign-release.bat)
 
-The private key is kept in blotter-release-key.pem next to this script, encrypted with your passphrase.
-It must never be copied to the PC that builds releases. Back it up (and the passphrase) somewhere offline:
+The private key is blotter-release-key.pem, encrypted with your passphrase: next to this script, or wherever
+BLOTTER_RELEASE_KEY points (full path to the .pem). Keep it in a folder no Claude session works in, and
+never copy it to the PC that builds releases. Back it up (and the passphrase) somewhere offline:
 without it no friend's Blotter accepts a new release. The public key (blotter-release-key.pub.txt) isn't
 secret; it goes into Blotter's blotter\\signing.py (CODE_KEY).
 """
@@ -14,6 +15,7 @@ import base64
 import getpass
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -25,8 +27,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (BestAvailableEncryption, Encoding, PrivateFormat,
                                                           PublicFormat, load_pem_private_key)
 
-KEY_FILE = HERE / "blotter-release-key.pem"
-PUBLIC_FILE = HERE / "blotter-release-key.pub.txt"
+KEY_FILE = Path(os.environ.get("BLOTTER_RELEASE_KEY", "").strip('" ') or HERE / "blotter-release-key.pem")
+PUBLIC_FILE = KEY_FILE.with_name("blotter-release-key.pub.txt")
 RELEASE = b"blotter release manifest v1\n"  # must equal RELEASE in Blotter's blotter\signing.py
 MIN_PASSPHRASE = 12
 
@@ -84,7 +86,8 @@ def check_release(manifest_path: Path) -> tuple[bytes, dict]:
 def sign(manifest_path: Path, key_file=KEY_FILE, ask=getpass.getpass, confirm=input) -> Path:
     data, m = check_release(manifest_path)
     if not key_file.is_file():
-        raise Stop(f"no release key here ({key_file.name}); make it first with: sign-release.bat new-key")
+        raise Stop(f"no release key at {key_file}. If you moved it, first type: set BLOTTER_RELEASE_KEY=<full path "
+                   f"to blotter-release-key.pem>, then run sign-release.bat again in the same window")
     print(f"\n  Blotter {m['version']}, commit {m.get('commit', '?')[:12]}")
     print(f"  {m['zip']}: {m['size']:,} bytes, SHA-256 {m['sha256']}")
     print("  What changed:")

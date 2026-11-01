@@ -514,6 +514,24 @@ class ReleaseBuildTests(unittest.TestCase):
         with self.assertRaises(sign_release.Stop):
             sign_release.check_release(out / "blotter-0.3.0.json")
 
+    def test_kit_finds_a_moved_key_through_blotter_release_key(self):
+        """The key may live outside the kit's folder (a folder no Claude session works in, a USB stick)."""
+        moved = Path(tempfile.mkdtemp()) / "blotter-release-key.pem"
+        for setting in (str(moved), f'"{moved}"'):
+            with mock.patch.dict(os.environ, {"BLOTTER_RELEASE_KEY": setting}):
+                kit = importlib.util.module_from_spec(_kit)
+                _kit.loader.exec_module(kit)
+            self.assertEqual(kit.KEY_FILE, moved)
+            self.assertEqual(kit.PUBLIC_FILE, moved.with_name("blotter-release-key.pub.txt"))
+        with mock.patch.dict(os.environ, {"BLOTTER_RELEASE_KEY": ""}):
+            kit = importlib.util.module_from_spec(_kit)
+            _kit.loader.exec_module(kit)
+        self.assertEqual(kit.KEY_FILE, ROOT / "tools" / "sign-release" / "blotter-release-key.pem")
+        out = Path(tempfile.mkdtemp())
+        make_release.build(self.repo(), out)
+        with self.assertRaisesRegex(sign_release.Stop, "BLOTTER_RELEASE_KEY"):
+            sign_release.sign(out / "blotter-0.3.0.json", moved, ask=lambda _: "x", confirm=lambda _: "y")
+
 
 # ---- the page: browsers must not offer to save keys or archive passwords ----
 
