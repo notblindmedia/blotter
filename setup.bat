@@ -9,6 +9,15 @@ echo  This creates a private Python folder (.venv) inside the Blotter folder
 echo  and installs the parts Blotter needs. Nothing else on the PC changes.
 echo.
 
+if /i not "%PROCESSOR_ARCHITECTURE%"=="ARM64" if /i not "%PROCESSOR_ARCHITEW6432%"=="ARM64" goto not_arm
+echo  This PC has an ARM processor (Windows on ARM, such as a Snapdragon laptop).
+echo  Blotter doesn't work on those: it needs an Intel or AMD processor.
+echo  Setup stopped here and nothing on this PC was changed.
+echo.
+pause
+exit /b 1
+:not_arm
+
 rem --- 0. A good place for the Blotter folder ---------------------------
 rem Two common traps: Windows' "Extract All" makes a blotter-X.Y.Z folder inside a blotter-X.Y.Z folder, and a
 rem Desktop or Documents folder backed up by OneDrive syncs the thousands of files in .venv. Offer a copy in
@@ -40,14 +49,21 @@ if errorlevel 8 goto place_failed
 echo.
 echo  Copied. Setup continues in a new window, from %TARGET%.
 echo  When it has finished, you can delete this folder: %HERE%
+echo  From now on, Blotter is in %TARGET%.
+echo.
 start "Blotter setup" "%TARGET%\setup.bat"
+pause
 exit /b 0
 :place_taken
 echo  There is already a folder there. If it is Blotter, close this window and
 echo  double-click setup.bat in %TARGET% instead.
 choice /c YN /m " Set up Blotter here anyway"
-if errorlevel 2 exit /b 1
+if errorlevel 2 goto place_quit
 goto place_ok
+:place_quit
+echo.
+pause
+exit /b 1
 :place_failed
 echo  Copying didn't work, so setup continues here.
 goto place_ok

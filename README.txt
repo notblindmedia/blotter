@@ -32,7 +32,9 @@ programming.
    folder is a folder inside a folder like that, or sits on a Desktop or
    in Documents backed up by OneDrive, setup.bat offers to copy Blotter to
    your own Blotter folder (C:\Users\<you>\Blotter) and set it up there:
-   say Y.
+   say Y. Setup goes on in a new window, and from then on that new folder
+   is your Blotter: start it from there, and delete the old one when setup
+   has finished.
 3. Set up (once): double-click setup.bat and answer its questions. Not
    sure? Y for Python (if Windows asks to allow it, say yes), S to skip
    the keys, N for ClamAV, Y for the desktop shortcut.
@@ -86,14 +88,16 @@ the sandbox.
      the same way as a file on its own (type, YARA, program, signature,
      macro, PDF and script checks), except for capa's deep check and the
      online lookups, which only look at the archive itself (the card says
-     so). A packed program inside without a valid signature makes the
-     answer "Couldn't fully check": alone, capa decides how much packing
-     counts. Windows' signature check runs on the first 10 programs inside.
+     so). A packed program inside makes the answer "Couldn't fully check"
+     unless a well-known publisher signed it: alone, capa decides how much
+     packing counts. Windows' signature check runs on the first 10 programs
+     inside. Two files with the same name inside are kept apart ("setup.exe"
+     and "setup.exe#2"), so one's signature says nothing about the other.
    - Containers Blotter can't open (disc and disk images .iso .img .vhd,
-     .cab, .gz and .tar, Windows installers .msi, OneNote .one, compiled
-     help .chm) give "Couldn't fully check": only the antivirus engines and
-     YARA see the files in them. Unpack one with 7-Zip and drop the files
-     on Blotter.
+     .cab, .gz, .tar, .bz2, .xz, .zst, .ace, .arj, .lzh and .uue, Windows
+     installers .msi, OneNote .one, compiled help .chm) give "Couldn't fully
+     check": only the antivirus engines and YARA see the files in them.
+     Unpack one with 7-Zip and drop the files on Blotter.
      Locked archives are tried with the password "infected" (what malware
      researchers use); if that doesn't open them, the result asks you for
      the password and checks again. The password is only kept in memory for
@@ -176,12 +180,17 @@ the sandbox.
      "Launch" actions that start programs, files packed inside, and names
      disguised to slip past scanners. Read as bytes, never opened. A PDF
      whose header comes after other bytes (PDF readers look in the first
-     1024) is still read as a PDF, and the card notes the trick.
+     1024) is still read as a PDF, and the card notes the trick; that note
+     doesn't change the answer by itself.
    - Web pages and SVG pictures (.html .htm .mht .svg ...): "HTML
      smuggling", a page that carries a whole file as encoded text and
      builds it in the browser as a download, is at least "Unusual" (and
      "Suspicious" when that file is a program, script, shortcut, disk
      image or archive). Their scripts get the JavaScript patterns below.
+     These checks and the script checks below go by the name's ending: a
+     file ending in .js or .html is read as one whatever it starts with,
+     and if its contents aren't plain text it counts as disguised
+     ("Suspicious"), also inside an archive.
    - Scripts and shortcuts (.ps1 .bat .cmd .vbs .js .hta .wsf .lnk ...):
      download-and-run lines, hidden windows, encoded commands, scrambled
      code, attempts to switch off Microsoft Defender. Web requests that only
@@ -261,7 +270,8 @@ Couldn't fully check
   antivirus engine could scan the file (Defender and ClamAV both failed, or
   ClamAV failed in test mode, where Defender isn't used). Also for a
   container Blotter can't open (a disc image, CAB, MSI, OneNote ...) and a
-  packed program inside an archive without a valid signature. One engine failing
+  packed program inside an archive, unless a well-known publisher signed
+  it. One engine failing
   while the other scans, or an online lookup failing, stays a note. The card
   names the check and its error.
   Blotter then never says "No known detections", because what it couldn't
@@ -301,7 +311,8 @@ SETUP (ONCE)
    - If the folder is in OneDrive, or is a blotter-X.Y.Z folder inside
      another one (what "Extract All" makes), it offers to copy Blotter to
      %USERPROFILE%\Blotter and continue there (the .venv folder it makes
-     would otherwise sync to OneDrive). You can delete the old folder then.
+     would otherwise sync to OneDrive). The new folder is your Blotter from
+     then on; you can delete the old one when setup has finished.
    - If Python 3.12 isn't installed, it offers to install it with winget.
    - It makes a private Python folder (.venv) inside the Blotter folder and
      installs exact, checksum-verified, ready-made versions of the parts
@@ -411,7 +422,9 @@ USING IT
      Blotter." Each engine's own line is under Details.
    - "Quarantine" (only for files chosen on this PC) moves the file into
      %LOCALAPPDATA%\Blotter\quarantine with a .blotted ending, so it can't be
-     opened by a double-click. "Put back" under Settings restores it.
+     opened by a double-click. "Put back" under Settings restores it, with
+     Windows' "downloaded from the internet" mark if it had one (when the
+     mark can't be kept, the file stays where it is and the card says why).
    - "Details" shows the fingerprint and what every check said.
    Below the card, "Checked since Blotter started" lists every file of
    this session, newest first, with its answer and its deep check ("deep

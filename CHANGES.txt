@@ -19,16 +19,24 @@ one "- " line per change. "next" collects changes until the next release.
 - Programs inside zip, rar and 7z archives now get Windows' signature
   check too (the first 10), and the card says that capa's deep check
   only looks at a program dropped on Blotter by itself. A packed program
-  inside without a valid signature gives "Couldn't fully check".
+  inside gives "Couldn't fully check" unless a well-known publisher signed
+  it. Two files with the same name inside are checked apart.
+- Files ending in .js, .html and the other script and web-page endings get
+  the script check whatever they start with, also inside archives; if
+  their contents aren't plain text they count as disguised.
 - Containers Blotter can't open (disc and disk images, CAB, GZIP/TAR,
-  MSI installers, OneNote, compiled help) give "Couldn't fully check"
+  BZIP2, XZ, Zstandard, ACE, ARJ, LZH, UUE, MSI installers, OneNote,
+  compiled help) give "Couldn't fully check"
   instead of "No known detections".
 - Web pages and SVG pictures that build a hidden file as a download
-  ("HTML smuggling") are at least Unusual. A PDF with junk before its
-  header is still checked as a PDF, and the card notes the trick.
+  ("HTML smuggling") are at least Unusual.
+- A PDF with junk before its header is still checked as a PDF. The card
+  adds a note about the trick; the note alone doesn't change the answer.
 - Online answers are asked again after 7 days.
 - When Microsoft Defender is switched off because another antivirus took
   over, the card and the page say to set up ClamAV.
 - setup.bat offers to copy Blotter out of OneDrive or out of the folder
-  inside a folder that "Extract All" makes. The shortcut and the page
-  have Blotter's icon.
+  inside a folder that "Extract All" makes, and stops with a plain message
+  on Windows on ARM. The shortcut and the page have Blotter's icon.
+- Quarantine and "Put back" keep Windows' "downloaded from the internet"
+  mark when the file moves between drives, or don't move it.

@@ -6,7 +6,11 @@ import unicodedata
 import zipfile
 from dataclasses import dataclass
 
+from .scripts import HTML_EXTS, SCRIPT_EXTS
+
 HEAD = 64 * 1024
+# Endings Windows or a browser runs as a script whatever the contents look like.
+SCRIPT_ENDINGS = SCRIPT_EXTS | HTML_EXTS
 
 # What a name ending promises. Only endings listed here are compared with the contents.
 FAMILIES = {
@@ -15,7 +19,8 @@ FAMILIES = {
     "shortcut": ["lnk"],
     "document": ("pdf doc docx docm dot dotx dotm xls xlsx xlsm xlsb xlt xltm ppt pptx pptm pps ppsx "
                  "rtf odt ods odp txt csv md log ini json xml epub one").split(),
-    "archive": "zip rar 7z gz tgz tar cab iso img vhd vhdx jar apk xpi vsix nupkg whl".split(),
+    "archive": ("zip rar 7z gz tgz tar cab iso img vhd vhdx jar apk xpi vsix nupkg whl bz2 tbz2 xz txz zst tzst "
+                "ace arj lzh uue z").split(),
     "image": "jpg jpeg png gif bmp ico webp tif tiff heic svg".split(),
     "media": "mp3 mp4 mkv avi mov wav flac ogg m4a webm wmv".split(),
 }
@@ -39,7 +44,8 @@ EXPECTED = {
     "ole": COMPATIBLE["ole"], "text": COMPATIBLE["text"], "lnk": {"lnk"}, "rtf": {"rtf", "doc"},
     "pdf": {"pdf"}, "rar": {"rar"}, "7z": {"7z"}, "gzip": {"gz", "tgz"}, "cab": {"cab"}, "chm": set(),
     "iso": {"iso", "img"}, "vhd": {"vhd", "vhdx"}, "tar": {"tar"}, "onenote": {"one"},
-    "msi": {"msi", "msp", "msm", "mst"},
+    "msi": {"msi", "msp", "msm", "mst"}, "zstd": {"zst", "tzst"}, "xz": {"xz", "txz"}, "bzip2": {"bz2", "tbz2"},
+    "ace": {"ace"}, "arj": {"arj"}, "lzh": {"lzh"},
     "java": set(), "png": {"png"}, "jpeg": {"jpg", "jpeg"}, "gif": {"gif"}, "bmp": {"bmp"}, "ico": {"ico"},
     "mp3": {"mp3"}, "flac": {"flac"}, "ogg": {"ogg"}, "mkv": {"mkv", "webm"}, "riff": {"webp", "avi", "wav"},
     "mp4": {"mp4", "mov", "m4a"},
@@ -113,6 +119,8 @@ MAGIC = [
     (b"7z\xbc\xaf\x27\x1c", "7z", "archive", "a 7-Zip archive"),
     (b"\x1f\x8b", "gzip", "archive", "a GZIP archive"),
     (b"MSCF", "cab", "archive", "a Windows cabinet (CAB) archive"),
+    (b"\x28\xb5\x2f\xfd", "zstd", "archive", "a Zstandard (ZST) archive"),
+    (b"\xfd7zXZ\x00", "xz", "archive", "an XZ archive"),
     (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole", "document", "an older Office document or installer (OLE)"),
     (b"{\\rt", "rtf", "document", "a rich-text document (RTF)"),
     (b"L\x00\x00\x00\x01\x14\x02\x00", "lnk", "shortcut", "a Windows shortcut (LNK)"),
@@ -141,6 +149,8 @@ MSI_CLASSES = {bytes.fromhex(h) for h in ("84100c0000000000c000000000000046", "8
                                           "82100c0000000000c000000000000046")}
 # Where a CD/DVD image (ISO 9660 or UDF) names its format: one of these 5-byte tags at 0x8001, 0x8801 or 0x9001.
 DISC_TAGS = (b"CD001", b"BEA01", b"NSR02", b"NSR03")
+BZIP2_BLOCKS = (bytes.fromhex("314159265359"), bytes.fromhex("177245385090"))  # after "BZh" and the level digit
+LZH_METHOD = re.compile(rb"-l[hz][0-9a-z]-")
 
 
 def _is_text(head: bytes) -> bool:
@@ -156,6 +166,28 @@ def _is_text(head: bytes) -> bool:
         if e.start > len(sample) - 4:
             return True  # cut in the middle of a character
         return sum(32 <= b < 127 or b in (9, 10, 13) for b in sample) / len(sample) > 0.95
+
+
+def _maybe_text(head: bytes) -> bool:
+    """Not recognised as text, but not clearly anything else: empty, or text in an older encoding (Shift-JIS,
+    Windows-1251...), which has many bytes above ASCII but no NUL and hardly any control characters."""
+    sample = head[:8192]
+    if not sample:
+        return True
+    return b"\x00" not in sample and sum(b < 32 and b not in (9, 10, 12, 13, 27) for b in sample) * 50 < len(sample)
+
+
+def _old_archive(head: bytes):
+    """(real, label) for formats whose magic bytes are too short to trust without a second look, or None."""
+    if head[:3] == b"BZh" and head[3:4].isdigit() and head[4:10] in BZIP2_BLOCKS:
+        return "bzip2", "a BZIP2 archive"
+    if head[7:14] == b"**ACE**":
+        return "ace", "an ACE archive"
+    if head[:2] == b"\x60\xea" and len(head) > 10 and 0 < struct.unpack_from("<H", head, 2)[0] <= 2600 and head[10] == 2:
+        return "arj", "an ARJ archive"
+    if LZH_METHOD.fullmatch(head[2:7]) and len(head) > 20 and head[20] <= 3:  # byte 20 is the header level, 0-3
+        return "lzh", "an LZH archive"
+    return None
 
 
 def _ole_class(f, head: bytes) -> bytes:
@@ -195,6 +227,9 @@ def detect(path) -> FileType:
             return FileType(kind, label, real, {})
     if any(head[at:at + 5] in DISC_TAGS for at in (0x8001, 0x8801, 0x9001)):
         return FileType("archive", "a disc image (ISO)", "iso", {})
+    old = _old_archive(head)
+    if old:
+        return FileType("archive", old[1], old[0], {})
     if tail.startswith(b"conectix"):  # a fixed-size VHD keeps its footer at the end only
         return FileType("archive", "a virtual hard disk (VHD)", "vhd", {})
     if head[257:262] == b"ustar":
@@ -212,7 +247,8 @@ def detect(path) -> FileType:
         return FileType("media", "an MP4 or QuickTime video", "mp4", {})
     if _is_text(head):
         return FileType("text", "a text file", "text", {})
-    return FileType("unknown", "a file of a kind Blotter doesn't recognise", "unknown", {})
+    return FileType("unknown", "a file of a kind Blotter doesn't recognise", "unknown",
+                    {"maybe_text": True} if _maybe_text(head) else {})
 
 
 def extensions(name: str) -> list[str]:
@@ -246,6 +282,8 @@ def compare(ft: FileType, name: str | None) -> dict:
     ext = exts[-1] if exts else None
     family = FAMILY_OF.get(ext)
     result = {"ext": ext, "claimed": family, "match": None, "disguised": False}
+    if ext in SCRIPT_ENDINGS and ft.kind != "text" and not ft.detail.get("maybe_text"):
+        return {**result, "match": False, "disguised": True, "script_ending": True}
     expected = EXPECTED.get(ft.real)
     if not family or expected is None:
         return result  # an ending we don't judge, or contents we don't recognise

@@ -1,4 +1,8 @@
-"""Layer 2: scripts and shortcuts (.ps1 .bat .cmd .vbs .js .hta .wsf .lnk ...). Reads the text, never runs it."""
+"""Layer 2: scripts and shortcuts (.ps1 .bat .cmd .vbs .js .hta .wsf .lnk ...). Reads the text, never runs it.
+
+Goes by the file's name ending, not by what its first bytes look like: Windows and browsers run a .js or .html
+whatever it starts with, so "// %PDF-1.7" or a NUL byte must not get a script past this check.
+"""
 
 from .. import hashing
 from ..analyze import filetype, scripts
@@ -29,11 +33,11 @@ def judge(ft, name, data, scope=None) -> list[Finding]:
     if ft.real == "lnk":
         found = scripts.analyze_lnk(ID, data, scope)
         return found or [Finding(ID, CLEAR, "The shortcut just opens a program or file, with no hidden command.", s)]
-    if ft.kind == "text" and ext in scripts.HTML_EXTS:
+    if ext in scripts.HTML_EXTS:
         found = scripts.analyze_html(ID, scripts.decode(data), scope)
         return found or [Finding(ID, CLEAR, f"Blotter read the .{ext} file's scripts and found no hidden download "
                                             "(HTML smuggling) and none of the usual malware tricks.", s)]
-    if ft.kind != "text" or ext not in scripts.SCRIPT_EXTS:
+    if ext not in scripts.SCRIPT_EXTS:
         return [Finding(ID, SKIPPED, "Not a script or shortcut, so there was nothing to read here.", s)]
     found = scripts.analyze_text(ID, scripts.decode(data), ext, scope)
     return found or [Finding(ID, CLEAR, f"Blotter read the .{ext} script and found none of the usual malware "

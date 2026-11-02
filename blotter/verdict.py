@@ -29,8 +29,8 @@ Couldn't check       nothing could run
 Couldn't fully check part of the file was over a size, depth or time limit, a check made for its kind of
                      file (unpacking, capa, Office, RTF, PDF, program, script, signature) or YARA failed on
                      it, or no antivirus engine could scan it (Defender and ClamAV both failed; in test mode
-                     ClamAV alone), or a packed program inside an archive has no valid signature (capa,
-                     which decides how much packing counts, doesn't run on files inside archives), or the
+                     ClamAV alone), or a packed program inside an archive isn't signed by a well-known
+                     publisher (capa, which decides how much packing counts, doesn't run there), or the
                      file is a container Blotter can't open (disk image, CAB, GZIP/TAR, MSI, OneNote, CHM).
                      Never "No known detections"; only Malicious or Suspicious from another check outranks it.
 
@@ -149,8 +149,8 @@ def _deep_check_unfinished(f, signed_by):
 
 
 def _signed_member(f, signed):
-    """A packed program inside an archive that capa didn't check is only unchecked while it has no valid signature:
-    alone, packing doesn't count for a signed program either (checks/archive.py)."""
+    """A packed program inside an archive that capa didn't check stays unchecked unless a well-known publisher signed
+    it. Any other valid signature doesn't waive that: anyone can buy one (checks/archive.py)."""
     if f.details.get("capa_skipped") is not True or f.details.get("scope", "") not in signed:
         return f
     return Finding(f.check, f.level, f.text, dict(f.details), [s for s in f.signals if s != UNCHECKED])
@@ -191,7 +191,7 @@ def decide(findings, trusted=False) -> dict:
     mild = {f.details.get("scope", ""): f.details["signed_by"] for f in findings
             if f.details.get("signed_by") and SIGNED in f.signals}
     no_av = _no_av_scanned(findings)
-    findings = [_signed_member(f, {**mild, **signed_by}) for f in findings]
+    findings = [_signed_member(f, signed_by) for f in findings]
     findings = [_generic_clamav(_deep_check_unfinished(_fail_closed(f, no_av), signed_by), signed_by) for f in findings]
     generic_signed = [f for f in findings if f.details.get("signed_generic")]
     levels = {f.level for f in findings}

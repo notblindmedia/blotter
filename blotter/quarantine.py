@@ -16,6 +16,8 @@ from pathlib import Path
 from . import config, hashing
 
 EXTENSION = ".blotted"
+MARK = ":Zone.Identifier"  # Windows' "downloaded from the internet" mark, a hidden stream on the file
+INVALID_NAME = 123  # the Windows error for a disk that has no such streams (FAT, exFAT): then it has no mark either
 _lock = threading.Lock()
 
 
@@ -46,6 +48,21 @@ def entries() -> list[dict]:
         return [e for e in _load() if Path(e["stored"]).exists()]
 
 
+def _copy_mark(source: Path, target: Path) -> None:
+    """A plain copy loses the mark, and a file without it opens without Windows' warnings."""
+    try:
+        with open(str(source) + MARK, "rb") as f:
+            mark = f.read()
+    except FileNotFoundError:
+        return
+    except OSError as e:
+        if getattr(e, "winerror", None) == INVALID_NAME:
+            return
+        raise
+    with open(str(target) + MARK, "wb") as f:
+        f.write(mark)
+
+
 def _move(source: Path, target: Path, sha256: str) -> None:
     try:
         os.replace(source, target)  # same drive: instant and atomic
@@ -57,6 +74,12 @@ def _move(source: Path, target: Path, sha256: str) -> None:
     if hashing.sha256_stream(open(part, "rb")) != sha256:
         part.unlink(missing_ok=True)
         raise QuarantineError("The copy in quarantine didn't match the original, so nothing was moved.")
+    try:
+        _copy_mark(source, part)
+    except OSError:
+        part.unlink(missing_ok=True)
+        raise QuarantineError("The copy couldn't keep Windows' \"downloaded from the internet\" mark (the other "
+                              "drive may not support it), so nothing was moved.")
     os.replace(part, target)
     source.unlink()
 

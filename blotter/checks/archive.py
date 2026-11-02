@@ -11,6 +11,9 @@ file would use up the VirusTotal quota); the card says so.
 Windows' signature service can't be reached from inside the sandbox, so there the sweep copies each
 program to sign/<n>.exe in its work folder and leaves a "sign_later" finding; worker.py runs the
 signature check on those copies outside the sandbox (it only reads them) before the folder is deleted.
+
+Each file inside has its own scope, also when two share a name ("setup.exe", "setup.exe#2"), because a signature
+quiets only what is said about its own scope (verdict.py).
 """
 
 import os
@@ -37,10 +40,10 @@ ZIP_BASED = {"zip", "ooxml", "odf", "jar"}  # formats that are a zip themselves 
 MAX_SIGNATURES = 10  # Windows signature checks are slow-ish; programs beyond this are still checked otherwise
 # Containers Blotter doesn't unpack: disc and disk images, CAB, GZIP/TAR, Windows installers, OneNote, compiled help.
 # Their files reach only the antivirus engines and YARA, so the answer is "Couldn't fully check" (fail closed).
-UNOPENED = {"iso", "vhd", "cab", "gzip", "tar", "msi", "onenote", "chm"}
+UNOPENED = {"iso", "vhd", "cab", "gzip", "tar", "msi", "onenote", "chm", "zstd", "xz", "bzip2", "ace", "arj", "lzh"}
 # Name endings of containers, for when the contents aren't recognised (a raw disk image, say).
 CONTAINER_ENDINGS = {"iso", "img", "vhd", "vhdx", "cab", "gz", "tgz", "tar", "bz2", "xz", "msi", "msp", "one",
-                     "onepkg", "chm", "wim", "dmg"}
+                     "onepkg", "chm", "wim", "dmg", "ace", "arj", "lzh", "zst", "tzst", "txz", "tbz2", "uue", "z"}
 
 
 class Sweep:
@@ -58,6 +61,8 @@ class Sweep:
         self.repaired: list[str] = []  # archives with a broken table of contents, read whole from file headers
         self.signatures = MAX_SIGNATURES
         self.programs = 0  # Windows programs inside, for the "capa didn't check these" line
+        self.scopes: set[str] = set()
+        self.named: dict[str, int] = {}  # how many files had each name, so "#n" doesn't start over at 2 every time
         self.rules = None
         try:
             self.rules = yararules.load()
@@ -137,72 +142,89 @@ class Sweep:
         finally:
             archives.remove(folder)
 
+    def unique_scope(self, name) -> str:
+        """This file's scope: its name, with #n when the name is taken (an archive can list one name twice). Never
+        empty: scope "" is the dropped file itself."""
+        name = name or "(no name)"
+        scope, n = name, self.named.get(name, 1)
+        while scope in self.scopes:
+            n += 1
+            scope = f"{name}#{n}"
+        self.named[name] = n
+        self.scopes.add(scope)
+        return scope
+
     def member(self, name, path, depth):
         self.checked += 1
+        scope = self.unique_scope(name)
         try:
-            self._member(name, path, depth)
+            self._member(name, scope, path, depth)
         except (archives.Bomb, archives.Locked):
             raise
         except Exception as e:  # one damaged file inside must not stop the rest
-            self.findings.append(Finding(ID, ERROR, f"Inside the archive, {name}: Blotter couldn't check this file "
-                                                    f"({type(e).__name__}).", {"scope": name}))
+            self.findings.append(Finding(ID, ERROR, f"Inside the archive, {scope}: Blotter couldn't check this file "
+                                                    f"({type(e).__name__}).", {"scope": scope}))
 
-    def _member(self, name, path, depth):
+    def _member(self, name, scope, path, depth):
+        """name: what the archive calls it, for its ending. scope: which file inside this is, for everything else."""
         ft = filetype.detect(path)
         part = archives.document_part(path) if ft.real == "zip" else None
         doc = part[0] if part else ft  # a .docx with a zip glued after it is judged as the document
-        found = [f for f in filetype_check.judge(doc, name, scope=name) if f.level != CLEAR]
+        found = [f for f in filetype_check.judge(doc, name, scope=scope) if f.level != CLEAR]
         if ft.real == "pe":
             self.programs += 1
-            found += program.analyze(ID, path, scope=name, check_signature=False)
+            found += program.analyze(ID, path, scope=scope, check_signature=False)
             if any(PACKED in f.signals for f in found):
-                # Alone, capa's deep check decides how much packing counts; here it doesn't run. A valid signature
-                # takes this back (verdict.py), as packing doesn't count for a signed program alone either.
+                # Alone, capa's deep check decides how much packing counts; here it doesn't run. Only a well-known
+                # publisher's signature takes this back (verdict.py).
                 found.append(unchecked(ID, "It is packed, and capa's deep check, which looks at what a packed "
                                            "program really does, doesn't run on files inside an archive. Drop "
                                            "it on Blotter by itself for the full check.",
-                                       {"scope": name, "capa_skipped": True}))
+                                       {"scope": scope, "capa_skipped": True}))
             if self.signatures > 0:
-                found += self.sign(name, path)
+                found += self.sign(scope, path)
             self.signatures -= 1
         elif doc.real in office.OFFICE_REALS:
             with open(path, "rb") as f:
-                found += office.analyze(ID, doc, f.read(part[1]) if part else f.read(), scope=name)
+                found += office.analyze(ID, doc, f.read(part[1]) if part else f.read(), scope=scope)
         elif ft.real == "pdf":
             with open(path, "rb") as f:
-                found += pdf_check.analyze(ID, f.read(pdf_check.MAX_READ), scope=name,
+                found += pdf_check.analyze(ID, f.read(pdf_check.MAX_READ), scope=scope,
                                            offset=ft.detail.get("pdf_offset", 0))
-        elif ft.real == "lnk" or ft.kind == "text":
+        endings = filetype.extensions(name or "")
+        if ft.real == "lnk" or ft.kind == "text" or (endings and endings[-1] in filetype.SCRIPT_ENDINGS):
             with open(path, "rb") as f:
                 text = f.read(scripts.MAX_TEXT)
-            found += [f for f in scripts_check.judge(ft, name, text, scope=name) if f.level != SKIPPED]
+            found += [f for f in scripts_check.judge(ft, name, text, scope=scope) if f.level != SKIPPED]
         if self.rules is not None:
             try:
-                found += yararules.scan_target(self.rules, ID, path=path, scope=name)
+                found += yararules.scan_target(self.rules, ID, path=path, scope=scope)
             except Exception as e:  # fails closed (verdict.py): this file wasn't fully checked
-                found.append(Finding(ID, ERROR, f"YARA couldn't scan it ({type(e).__name__}).", {"scope": name}))
-        shut = unopened(ft, name, scope=name)
+                found.append(Finding(ID, ERROR, f"YARA couldn't scan it ({type(e).__name__}).", {"scope": scope}))
+        shut = unopened(ft, name, scope=scope)
         if shut:
             found.append(shut)
         if depth >= config.ARCHIVE_MAX_DEPTH:
             if ft.real in ARCHIVES or (ft.real != "pe" and archives.zip_segments(path)):
-                self.too_big.append(f"{name} because archives are nested more than {config.ARCHIVE_MAX_DEPTH} deep")
+                self.too_big.append(f"{scope} because archives are nested more than {config.ARCHIVE_MAX_DEPTH} deep")
         else:
-            self.contents(path, ft, name + "/", depth + 1)
+            self.contents(path, ft, scope + "/", depth + 1)
         for f in found:
             f.check = ID
             if f.level == CLEAR and not f.signals:
                 continue  # "nothing unusual" for each file would bury what matters
-            f.text = f"Inside the archive, {name}: {f.text}"
+            f.text = f"Inside the archive, {scope}: {f.text}"
             self.findings.append(f)
 
 
 def unopened(ft, name, scope=None) -> Finding | None:
     """"Couldn't fully check" for a container Blotter can't open, or None."""
     exts = filetype.extensions(name or "")
-    if ft.real not in UNOPENED and not (ft.real == "unknown" and exts and exts[-1] in CONTAINER_ENDINGS):
+    # Text counts too: a .uue is an archive written as text.
+    named = ft.real in ("unknown", "text") and exts and exts[-1] in CONTAINER_ENDINGS
+    if ft.real not in UNOPENED and not named:
         return None
-    what = ft.label if ft.real != "unknown" else "this kind of file"
+    what = f"a .{exts[-1]} file" if named else ft.label
     return unchecked(ID, f"Blotter can't look inside {what}, so its own checks (lying names, scripts, macros, "
                          "programs) didn't see the files in it; only the antivirus engines and YARA did. Unpack it "
                          "with a tool like 7-Zip and drop the files inside on Blotter for the full check.",

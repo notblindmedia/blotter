@@ -37,7 +37,9 @@ if os.environ.get("BLOTTER_PATHS"):
 else:
     PATHS = [str(config.ROOT), *(p for p in site.getsitepackages() if p.lower().endswith("site-packages"))]
 BOOT = f"import sys; sys.path[:0] = {PATHS!r}; import blotter.worker as w; w.main()"
-SIGN_TIME = 60  # seconds for the signature checks of programs inside an archive, after the worker is done
+# Seconds for the signature checks of programs inside an archive, after the worker is done. A check only starts with
+# program.SIGNATURE_TIMEOUT left, so a slow one can't run past the runner's backstop and cost the archive's findings.
+SIGN_TIME = 60
 _SIGN_NAME = re.compile(r"sign/\d{1,3}\.exe")
 
 
@@ -115,7 +117,8 @@ def sign_inside(findings, workdir: Path, cancel=None) -> list[Finding]:
         copy = workdir / str(rel)
         ok = (isinstance(rel, str) and _SIGN_NAME.fullmatch(rel) and not copy.is_symlink() and copy.is_file()
               and copy.resolve().parent == folder)
-        if not ok or time.monotonic() > deadline or (cancel is not None and cancel.is_set()):
+        out_of_time = deadline - time.monotonic() < program.SIGNATURE_TIMEOUT
+        if not ok or out_of_time or (cancel is not None and cancel.is_set()):
             out.append(Finding(f.check, NOTE, f"Inside the archive, {scope}: Windows couldn't check its signature "
                                               "this time.", {"scope": scope}))
             continue

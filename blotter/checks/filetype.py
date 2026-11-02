@@ -41,7 +41,13 @@ def judge(ft, name, scope=None) -> list[Finding]:
 
     claim = filetype.compare(ft, name)
     details.update(claimed=claim["claimed"], ext=claim["ext"])
-    if claim["disguised"]:
+    if claim.get("script_ending"):
+        findings.append(Finding(ID, NOTE,
+            f"Its name ends in .{claim['ext']}, so it would be run as a script or opened as a web page, but its "
+            f"contents aren't plain text (Blotter sees {ft.label}). A file that passes for two things at once is a "
+            "trick to get past checks that only look at one of them.",
+            {**details, "ability": "disguised"}, [DISGUISED, LYING_NAME]))
+    elif claim["disguised"]:
         findings.append(Finding(ID, NOTE,
             f"This is really {ft.label}, but its name ends in .{claim['ext']}. "
             "Programs dressed up as documents, pictures or videos are a common malware trick.",
