@@ -105,7 +105,7 @@ def _zip(path, visit, budget, folder, passwords):
         # The table of contents at the end is damaged or missing. 7-Zip, WinRAR and tar still unpack such
         # zips from each file's own header, so Blotter reads them that way too.
         return _zip_lenient(path, visit, budget, folder)
-    visited = set()
+    visited, visited_at = set(), set()
     with z:
         infos = [i for i in z.infolist() if not i.is_dir()]
         declared_total = sum(i.file_size for i in infos)
@@ -120,7 +120,7 @@ def _zip(path, visit, budget, folder, passwords):
                 # The table of contents points to the wrong place, or this file's data is damaged: read the
                 # rest from the files' own headers (files already checked aren't checked twice).
                 target.unlink(missing_ok=True)
-                notes = _zip_lenient(path, visit, budget, folder, skip=visited)
+                notes = _zip_lenient(path, visit, budget, folder, skip=visited_at)
                 # Files the table of contents lists that no header gave back were lost (an overwritten start).
                 seen = visited | set(notes["read"]) | set(notes["locked"]) | set(notes["damaged"])
                 lost = [i.filename for i in infos if i.filename not in seen]
@@ -130,6 +130,7 @@ def _zip(path, visit, budget, folder, passwords):
                 continue
             visit(info.filename, target)
             visited.add(info.filename)
+            visited_at.add(info.header_offset)
             target.unlink(missing_ok=True)
     return {"locked": locked, "damaged": []}
 
@@ -142,7 +143,8 @@ DIRECTORY = (b"PK\x01\x02", b"PK\x05\x06", b"PK\x06\x06")  # the table of conten
 def _zip_lenient(path, visit, budget, folder, skip=()):
     """Unpack a zip whose table of contents is broken by walking the files' own headers from the start.
     Notes: 'damaged' names files that couldn't be read whole (what could be read is still checked),
-    'complete' says whether the walk reached the table of contents, so no file can be missing."""
+    'complete' says whether the walk reached the table of contents, so no file can be missing.
+    skip: where the files already checked start. Not their names: two files in a zip can share one."""
     locked, damaged, read, count, last_end = [], [], [], 0, None
     with open(path, "rb") as fh:
         if os.fstat(fh.fileno()).st_size == 0:
@@ -163,16 +165,16 @@ def _zip_lenient(path, visit, budget, folder, skip=()):
                     pos = m.find(LOCAL_HEADER, last_end)
                     continue
                 count += 1
-                if name not in skip:
+                if pos not in skip:
                     budget.member(name, entry["usize"] or None, entry["csize"] or None)
                 target = folder / f"m{count:04d}.blotter"
                 if entry["flags"] & 0x1:  # locked: the normal reader tries passwords, this one doesn't
                     locked.append(name)
                     last_end = entry["data"] + entry["csize"] if entry["csize"] else None
                 else:
-                    last_end, whole = _lenient_member(m, entry, target, budget if name not in skip else Budget())
+                    last_end, whole = _lenient_member(m, entry, target, budget if pos not in skip else Budget())
                     (read if whole else damaged).append(name)
-                    if target.is_file() and target.stat().st_size and name not in skip:
+                    if target.is_file() and target.stat().st_size and pos not in skip:
                         visit(name, target)  # whole or not: check what is there
                     target.unlink(missing_ok=True)
                 pos = m.find(LOCAL_HEADER, last_end if last_end is not None else entry["data"])

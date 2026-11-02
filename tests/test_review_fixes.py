@@ -383,6 +383,15 @@ class OneScopePerFileTests(unittest.TestCase):
         scopes = [sweep.unique_scope(n) for n in ("a", "a#2", "a", "a", "", "")]
         self.assertEqual(scopes, ["a", "a#2", "a#3", "a#4", "(no name)", "(no name)#2"])
 
+    def test_a_damaged_zip_doesnt_lose_the_second_file(self):
+        data = bytearray(zip_listing(("setup.exe", b"GOOD" * 10), ("broken.txt", b"x" * 50), ("setup.exe", b"EVIL" * 10)))
+        table = data.find(b"PK\x01\x02")
+        struct.pack_into("<I", data, data.find(b"PK\x01\x02", table + 4) + 16, 0x12345678)  # broken.txt's checksum
+        seen = []
+        archives.walk(put("t.zip", bytes(data)), "zip", lambda name, p: seen.append(p.read_bytes()[:4]),
+                      archives.Budget())
+        self.assertEqual(sorted(seen), [b"EVIL", b"GOOD", b"xxxx"])  # each once
+
 
 class MoreContainersTests(unittest.TestCase):
     """Second review M1."""
