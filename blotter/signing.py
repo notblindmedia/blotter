@@ -7,7 +7,8 @@ Two keys with one job each; both public halves are built in here:
 Every signature covers a purpose line plus the exact bytes, so a pack signature can't pass as a release
 signature, even if both keys were the same.
 
-    python -m blotter.signing     shows both keys' fingerprints (setup.bat does this)
+    python -m blotter.signing                  shows the check code (setup.bat does this)
+    python -m blotter.signing --fingerprints   also shows each key's full fingerprint
 """
 
 import base64
@@ -24,6 +25,9 @@ PACK_KEY = "uQaqrWYeeLub+fivxJLH+Sc4PzJ7JoSq0Z75KcqiUOo="  # made 2026-11-01; fi
 
 RELEASE = b"blotter release manifest v1\n"
 PACK = b"blotter intel pack v1\n"
+CHECK = b"blotter check code v1\n"
+# Crockford's base32: no I, L, O or U, so nothing is misread when the code is read out or typed.
+CHECK_LETTERS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 class BadSignature(Exception):
@@ -46,6 +50,15 @@ def fingerprint(public_b64: str) -> str:
     return " ".join(digest[i:i + 4] for i in range(0, 32, 4))
 
 
+def check_code(code_key: str = None, pack_key: str = None) -> str:
+    """One short code for both built-in keys, for friends to compare: 12 characters (60 bits of SHA-256)
+    as 3 groups of 4. Swapping either key changes it."""
+    raw = _raw(CODE_KEY if code_key is None else code_key) + _raw(PACK_KEY if pack_key is None else pack_key)
+    n = int.from_bytes(hashlib.sha256(CHECK + raw).digest()[:8], "big") >> 4
+    code = "".join(CHECK_LETTERS[(n >> shift) & 31] for shift in range(55, -1, -5))
+    return "-".join(code[i:i + 4] for i in range(0, 12, 4))
+
+
 def public_b64(private: Ed25519PrivateKey) -> str:
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     return base64.b64encode(private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode("ascii")
@@ -64,21 +77,25 @@ def verify(public: str, purpose: bytes, data: bytes, signature: bytes | str) -> 
         raise BadSignature("the signature doesn't match: the file was changed or signed with another key") from None
 
 
-def describe() -> list[str]:
-    lines = []
-    for name, key in (("Release key (code)", CODE_KEY), ("Intel pack key (data)", PACK_KEY)):
-        try:
-            lines.append(f"{name}: {fingerprint(key)}")
-        except BadSignature:
-            lines.append(f"{name}: not built into this copy yet")
+def describe(fingerprints: bool = False) -> list[str]:
+    try:
+        lines = [f"Check code: {check_code()}"]
+    except BadSignature:
+        lines = ["Check code: none, a signing key isn't built into this copy yet"]
+    if fingerprints:
+        for name, key in (("Release key (code)", CODE_KEY), ("Intel pack key (data)", PACK_KEY)):
+            try:
+                lines.append(f"{name}: {fingerprint(key)}")
+            except BadSignature:
+                lines.append(f"{name}: not built into this copy yet")
     return lines
 
 
-def main() -> int:
-    for line in describe():
+def main(argv=()) -> int:
+    for line in describe(fingerprints="--fingerprints" in argv):
         print(" ", line)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

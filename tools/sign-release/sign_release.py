@@ -113,7 +113,7 @@ def main(argv) -> int:
             public = new_key()
             print(f"\n  Release key made: {KEY_FILE}")
             print(f"  Public key (send it to Claude for Blotter): {public}")
-            print(f"  Fingerprint (send it to friends): {fingerprint(public)}")
+            print(f"  Fingerprint (to compare once it is built into Blotter): {fingerprint(public)}")
             print(f"  Both are also in {PUBLIC_FILE.name}. Back up the .pem and the passphrase offline now.")
         elif len(argv) == 1 and argv[0].lower().endswith(".json"):
             out = sign(Path(argv[0]))

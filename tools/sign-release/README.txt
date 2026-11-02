@@ -33,7 +33,9 @@ ONCE: MAKE THE RELEASE KEY
    can sign a release without it; nobody can recover it for you.
 4. It shows a public key and a fingerprint (8 groups of 4 characters) and
    saves both in blotter-release-key.pub.txt. Send the public key to Claude
-   on the Blotter PC; it is not secret. Give friends the fingerprint.
+   on the Blotter PC; it is not secret. Friends compare the check code
+   Blotter's setup.bat shows (made from this key and the pack key); Claude
+   gives you that code once the key is built in.
 5. Back up blotter-release-key.pem and the passphrase offline right away
    (a USB stick in a drawer, a password manager). Lose them and friends'
    copies of Blotter can't accept new releases any more.

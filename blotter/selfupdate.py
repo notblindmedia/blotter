@@ -195,7 +195,7 @@ def run(root: Path = config.ROOT, current: str = __version__, ask=input) -> int:
         print(f"  Update refused: {e}. Nothing was changed.")
         return 1
     print(f"\n  Blotter {manifest['version']} is available, signed with the release key")
-    print(f"  ({signing.fingerprint(signing.CODE_KEY)}).\n\n  What changed:")
+    print(f"  (check code {signing.check_code()}).\n\n  What changed:")
     for line in manifest.get("changes") or ["(no notes)"]:
         print(f"   - {line}")
     print()
