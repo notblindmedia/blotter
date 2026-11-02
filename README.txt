@@ -425,6 +425,8 @@ USING IT
      opened by a double-click. "Put back" under Settings restores it, with
      Windows' "downloaded from the internet" mark if it had one (when the
      mark can't be kept, the file stays where it is and the card says why).
+     So "Put back" can't restore a downloaded file to a FAT or exFAT USB
+     stick: those can't hold the mark.
    - "Details" shows the fingerprint and what every check said.
    Below the card, "Checked since Blotter started" lists every file of
    this session, newest first, with its answer and its deep check ("deep

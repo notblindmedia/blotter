@@ -10,6 +10,8 @@ import struct
 from ..findings import NOTE, Finding, hiding, risky
 
 SCRIPT_EXTS = {"ps1", "psm1", "psd1", "bat", "cmd", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "reg"}
+BATCH_EXTS = {"bat", "cmd"}
+BYTE_ORDER_MARKS = (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff")
 MAX_TEXT = 4 * 1024 * 1024
 I = re.I | re.S
 
@@ -195,6 +197,15 @@ def decode(data: bytes) -> str:
     if data[1:2] == b"\x00" and data[3:4] == b"\x00":
         return data.decode("utf-16-le", "replace")
     return data.decode("utf-8", "replace")
+
+
+def decode_batch(data: bytes) -> str:
+    """cmd.exe reads a batch file as single bytes and knows no byte-order marks: to it a mark is junk on the first
+    line, and the lines after it run. A file with NUL bytes (real UTF-16) is read the wide way too."""
+    data = data[:MAX_TEXT]
+    body = next((data[len(mark):] for mark in BYTE_ORDER_MARKS if data.startswith(mark)), data)
+    text = body.decode("latin-1")
+    return f"{text}\n{decode(data)}" if b"\x00" in data else text
 
 
 def analyze_text(check, text, kind, scope=None, where="It") -> list[Finding]:

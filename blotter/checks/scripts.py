@@ -39,6 +39,7 @@ def judge(ft, name, data, scope=None) -> list[Finding]:
                                             "(HTML smuggling) and none of the usual malware tricks.", s)]
     if ext not in scripts.SCRIPT_EXTS:
         return [Finding(ID, SKIPPED, "Not a script or shortcut, so there was nothing to read here.", s)]
-    found = scripts.analyze_text(ID, scripts.decode(data), ext, scope)
+    text = scripts.decode_batch(data) if ext in scripts.BATCH_EXTS else scripts.decode(data)
+    found = scripts.analyze_text(ID, text, ext, scope)
     return found or [Finding(ID, CLEAR, f"Blotter read the .{ext} script and found none of the usual malware "
                                         "tricks (download-and-run, hidden windows, encoded commands).", s)]

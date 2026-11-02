@@ -105,7 +105,7 @@ def _zip(path, visit, budget, folder, passwords):
         # The table of contents at the end is damaged or missing. 7-Zip, WinRAR and tar still unpack such
         # zips from each file's own header, so Blotter reads them that way too.
         return _zip_lenient(path, visit, budget, folder)
-    visited, visited_at = set(), set()
+    visited_at = set()
     with z:
         infos = [i for i in z.infolist() if not i.is_dir()]
         declared_total = sum(i.file_size for i in infos)
@@ -121,18 +121,28 @@ def _zip(path, visit, budget, folder, passwords):
                 # rest from the files' own headers (files already checked aren't checked twice).
                 target.unlink(missing_ok=True)
                 notes = _zip_lenient(path, visit, budget, folder, skip=visited_at)
-                # Files the table of contents lists that no header gave back were lost (an overwritten start).
-                seen = visited | set(notes["read"]) | set(notes["locked"]) | set(notes["damaged"])
-                lost = [i.filename for i in infos if i.filename not in seen]
+                lost = _lost(infos, visited_at, notes["positions"])
                 return {**notes, "locked": locked + notes["locked"], "damaged": notes["damaged"] + lost}
             if not opened:
                 locked.append(info.filename)
                 continue
             visit(info.filename, target)
-            visited.add(info.filename)
             visited_at.add(info.header_offset)
             target.unlink(missing_ok=True)
     return {"locked": locked, "damaged": []}
+
+
+def _lost(infos, visited_at, positions) -> list[str]:
+    """Files the table of contents lists whose header neither reader reached (an overwritten start, say). By position,
+    not name: a second file can share the name of one that was read."""
+    shift = 0
+    listed = {i.header_offset for i in infos}
+    reached = visited_at | set(positions)
+    if positions and not listed & reached:
+        # None lines up, so nothing proves the table's positions: a wrong pointer to the table moves them all by the
+        # same amount. Line them up on the first file. A position still only counts where the walk read a file.
+        shift = min(positions) - min(listed)
+    return [i.filename for i in infos if i.header_offset + shift not in reached]
 
 
 LOCAL_HEADER = b"PK\x03\x04"
@@ -145,7 +155,7 @@ def _zip_lenient(path, visit, budget, folder, skip=()):
     Notes: 'damaged' names files that couldn't be read whole (what could be read is still checked),
     'complete' says whether the walk reached the table of contents, so no file can be missing.
     skip: where the files already checked start. Not their names: two files in a zip can share one."""
-    locked, damaged, read, count, last_end = [], [], [], 0, None
+    locked, damaged, positions, count, last_end = [], [], [], 0, None
     with open(path, "rb") as fh:
         if os.fstat(fh.fileno()).st_size == 0:
             raise zipfile.BadZipFile("the file is empty")
@@ -165,6 +175,7 @@ def _zip_lenient(path, visit, budget, folder, skip=()):
                     pos = m.find(LOCAL_HEADER, last_end)
                     continue
                 count += 1
+                positions.append(pos)
                 if pos not in skip:
                     budget.member(name, entry["usize"] or None, entry["csize"] or None)
                 target = folder / f"m{count:04d}.blotter"
@@ -173,13 +184,14 @@ def _zip_lenient(path, visit, budget, folder, skip=()):
                     last_end = entry["data"] + entry["csize"] if entry["csize"] else None
                 else:
                     last_end, whole = _lenient_member(m, entry, target, budget if pos not in skip else Budget())
-                    (read if whole else damaged).append(name)
+                    if not whole:
+                        damaged.append(name)
                     if target.is_file() and target.stat().st_size and pos not in skip:
                         visit(name, target)  # whole or not: check what is there
                     target.unlink(missing_ok=True)
                 pos = m.find(LOCAL_HEADER, last_end if last_end is not None else entry["data"])
             complete = last_end is not None and m[last_end:last_end + 4] in DIRECTORY
-    return {"locked": locked, "damaged": damaged, "read": read, "lenient": True, "complete": complete}
+    return {"locked": locked, "damaged": damaged, "positions": positions, "lenient": True, "complete": complete}
 
 
 def _local_entry(m, pos):
