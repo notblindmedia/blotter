@@ -20,7 +20,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import hashing, procs, worker
+from . import config, hashing, procs, worker
 from .findings import ERROR, LEVELS, SKIPPED, UNCHECKED, Finding
 from .verdict import decide
 
@@ -97,6 +97,12 @@ class Runner:
                  "verdict": (j.verdict or {}).get("verdict"), "title": (j.verdict or {}).get("title"),
                  "deep_queue": j.queue.position(j) if j.queue else None} for j in reversed(jobs)]
 
+    def defender_off(self) -> bool:
+        """True once Defender said it isn't running because another antivirus took over (checks/defender.py)."""
+        with self._lock:
+            jobs = list(self.jobs.values())
+        return any(f.details.get("other_antivirus") for j in jobs for f in j.checks.get("defender", {}).get("findings", []))
+
     def get(self, job_id) -> Job | None:
         with self._lock:
             return self.jobs.get(job_id)
@@ -139,7 +145,9 @@ class Runner:
                 continue
             t = threading.Thread(target=self._run_check, args=(job, check, path, save_error, force), daemon=True)
             t.start()
-            grace = 5 if isolated(check) else 0  # the worker enforces the timeout itself; this is a backstop
+            # The worker enforces the timeout itself; this is a backstop. EXTRA_TIME: work after the worker
+            # (the archive check's signature checks, worker.sign_inside).
+            grace = 5 + getattr(check, "EXTRA_TIME", 0) if isolated(check) else 0
             started.append((check, t, time.monotonic() + check.TIMEOUT + grace))
         self._wait(job, started)
         if any(not item.done.is_set() for item in deep):
@@ -220,7 +228,7 @@ class Runner:
         """Answers that need no work: a remembered one, or none because the copy couldn't be saved."""
         cached = None
         if getattr(check, "CACHE", False) and not force:
-            cached = self.cache.get(job.sha256, _cache_id(check))
+            cached = self.cache.get(job.sha256, _cache_id(check), max_age=config.ONLINE_MAX_AGE)
         if cached:
             self._finish(job, check.ID, cached[0], cached_at=cached[1])
             return True

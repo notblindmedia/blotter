@@ -261,6 +261,33 @@ def analyze_text(check, text, kind, scope=None, where="It") -> list[Finding]:
     return out
 
 
+# Web pages and SVG pictures: "HTML smuggling" carries a file inside the page as encoded text and builds it in the
+# browser, so the download never passes a mail or web filter as a file. A payload (a long base64 text or list of
+# numbers) + a file made from it (Blob, File, a data: address) + handing it over as a download is the pattern; an
+# "export to CSV" button only has the last two.
+HTML_EXTS = {"html", "htm", "xhtml", "xht", "shtml", "mht", "mhtml", "svg"}
+PAYLOAD = re.compile(r"[A-Za-z0-9+/]{400,}={0,2}|(?:\d{1,3}\s*,\s*){200,}")
+MAKES_FILE = re.compile(r"\bnew\s+(?:Blob|File)\s*\(|createObjectURL\s*\(|data:[\w./+-]*;base64,", I)
+HANDS_OVER = re.compile(r"\.download\s*=|\bdownload\s*=\s*['\"]|\bdownload\s*['\"]?\s*:|setAttribute\s*\(\s*['\"]"
+                        r"download|msSaveOrOpenBlob|msSaveBlob|saveAs\s*\(|location(?:\.href)?\s*=\s*[\w$.]*url", I)
+DROPS = re.compile(r"""\.(?:exe|dll|scr|com|msi|js|jse|vbs|vbe|hta|wsf|bat|cmd|ps1|lnk|iso|img|vhdx?|zip|rar|7z|
+                   cab|one|jar)['"`]""", I | re.X)
+
+
+def analyze_html(check, text, scope=None) -> list[Finding]:
+    """A web page or SVG: HTML smuggling, plus the JavaScript patterns for the scripts in it."""
+    s = {"scope": scope} if scope else {}
+    out = []
+    if PAYLOAD.search(text) and MAKES_FILE.search(text) and HANDS_OVER.search(text):
+        dropped = DROPS.search(text)
+        what = f" (it names a {dropped.group(0)[1:-1].lower()} file)" if dropped else ""
+        out.append(risky(check, "html-smuggling",
+            f"It carries a file inside the page as encoded text and builds it in your browser as a download{what}. "
+            "That is \"HTML smuggling\", a way to get malware past mail and web filters; ordinary web pages "
+            "don't hide whole files in themselves.", s, hiding=bool(dropped)))
+    return out + analyze_text(check, text, "js", scope)
+
+
 def _ansi(raw: bytes) -> str:
     try:
         return raw.decode("mbcs", "replace")  # Windows' own code page

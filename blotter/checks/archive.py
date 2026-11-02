@@ -4,29 +4,43 @@ Zips hidden in other files count too: a zip glued after a picture or PDF, two zi
 appended after a program (self-extracting installers do that), or one whose start was overwritten.
 
 Each file inside gets the type/disguise check, YARA, and the program, macro, PDF or script check
-that fits it. capa and the online lookups only look at the archive itself (capa would take too long
-for every file, and lookups for each file would use up the VirusTotal quota).
+that fits it; the first MAX_SIGNATURES programs also get Windows' signature check. capa and the online
+lookups only look at the archive itself (capa would take too long for every file, and lookups for each
+file would use up the VirusTotal quota); the card says so.
+
+Windows' signature service can't be reached from inside the sandbox, so there the sweep copies each
+program to sign/<n>.exe in its work folder and leaves a "sign_later" finding; worker.py runs the
+signature check on those copies outside the sandbox (it only reads them) before the folder is deleted.
 """
 
 import os
+import shutil
+from pathlib import Path
 
 from .. import config, hashing
 from ..analyze import archives, filetype, office, program, scripts, yararules
 from . import filetype as filetype_check
 from . import pdf as pdf_check
 from . import scripts as scripts_check
-from ..findings import CLEAR, ERROR, HIDDEN_ZIP, HIDING, NOTE, SKIPPED, UNCHECKED, Finding
+from ..findings import CLEAR, ERROR, HIDDEN_ZIP, HIDING, NOTE, PACKED, SKIPPED, UNCHECKED, Finding, unchecked
 
 ID = "archive"
 NAME = "Archive contents"
 ORDER = 2
 TIMEOUT = 240
+EXTRA_TIME = 60  # worker.SIGN_TIME: the signature checks of the programs inside run after the sweep
 CACHE = False
 NEEDS_FILE = True
 
 ARCHIVES = {"zip", "rar", "7z"}
 ZIP_BASED = {"zip", "ooxml", "odf", "jar"}  # formats that are a zip themselves (a .docx is one)
 MAX_SIGNATURES = 10  # Windows signature checks are slow-ish; programs beyond this are still checked otherwise
+# Containers Blotter doesn't unpack: disc and disk images, CAB, GZIP/TAR, Windows installers, OneNote, compiled help.
+# Their files reach only the antivirus engines and YARA, so the answer is "Couldn't fully check" (fail closed).
+UNOPENED = {"iso", "vhd", "cab", "gzip", "tar", "msi", "onenote", "chm"}
+# Name endings of containers, for when the contents aren't recognised (a raw disk image, say).
+CONTAINER_ENDINGS = {"iso", "img", "vhd", "vhdx", "cab", "gz", "tgz", "tar", "bz2", "xz", "msi", "msp", "one",
+                     "onepkg", "chm", "wim", "dmg"}
 
 
 class Sweep:
@@ -43,6 +57,7 @@ class Sweep:
         self.hidden: list[tuple] = []
         self.repaired: list[str] = []  # archives with a broken table of contents, read whole from file headers
         self.signatures = MAX_SIGNATURES
+        self.programs = 0  # Windows programs inside, for the "capa didn't check these" line
         self.rules = None
         try:
             self.rules = yararules.load()
@@ -103,6 +118,18 @@ class Sweep:
             found = True
         return found
 
+    def sign(self, name, path) -> list[Finding]:
+        """Windows' signature check on one program inside: here, or (inside a worker) later, outside the sandbox."""
+        work = os.environ.get("BLOTTER_WORK")
+        if not work:
+            return program.signature_findings(ID, path, {"scope": name})
+        n = MAX_SIGNATURES - self.signatures
+        copy = Path(work) / "sign" / f"{n}.exe"
+        copy.parent.mkdir(exist_ok=True)
+        shutil.copyfile(path, copy)
+        return [Finding(ID, NOTE, "Windows' signature check didn't run on it.",
+                        {"scope": name, "sign_later": f"sign/{n}.exe"})]
+
     def _segment(self, path, start, end, prefix, depth):
         folder = archives.workdir()
         try:
@@ -126,17 +153,25 @@ class Sweep:
         doc = part[0] if part else ft  # a .docx with a zip glued after it is judged as the document
         found = [f for f in filetype_check.judge(doc, name, scope=name) if f.level != CLEAR]
         if ft.real == "pe":
-            # Inside the sandbox Windows' signature check isn't available, so only the archive's own
-            # programs outside a sandbox get one (Blotter falls back to it when no sandbox could start).
-            found += program.analyze(ID, path, scope=name,
-                                     check_signature=self.signatures > 0 and not os.environ.get("BLOTTER_WORK"))
+            self.programs += 1
+            found += program.analyze(ID, path, scope=name, check_signature=False)
+            if any(PACKED in f.signals for f in found):
+                # Alone, capa's deep check decides how much packing counts; here it doesn't run. A valid signature
+                # takes this back (verdict.py), as packing doesn't count for a signed program alone either.
+                found.append(unchecked(ID, "It is packed, and capa's deep check, which looks at what a packed "
+                                           "program really does, doesn't run on files inside an archive. Drop "
+                                           "it on Blotter by itself for the full check.",
+                                       {"scope": name, "capa_skipped": True}))
+            if self.signatures > 0:
+                found += self.sign(name, path)
             self.signatures -= 1
         elif doc.real in office.OFFICE_REALS:
             with open(path, "rb") as f:
                 found += office.analyze(ID, doc, f.read(part[1]) if part else f.read(), scope=name)
         elif ft.real == "pdf":
             with open(path, "rb") as f:
-                found += pdf_check.analyze(ID, f.read(pdf_check.MAX_READ), scope=name)
+                found += pdf_check.analyze(ID, f.read(pdf_check.MAX_READ), scope=name,
+                                           offset=ft.detail.get("pdf_offset", 0))
         elif ft.real == "lnk" or ft.kind == "text":
             with open(path, "rb") as f:
                 text = f.read(scripts.MAX_TEXT)
@@ -146,6 +181,9 @@ class Sweep:
                 found += yararules.scan_target(self.rules, ID, path=path, scope=name)
             except Exception as e:  # fails closed (verdict.py): this file wasn't fully checked
                 found.append(Finding(ID, ERROR, f"YARA couldn't scan it ({type(e).__name__}).", {"scope": name}))
+        shut = unopened(ft, name, scope=name)
+        if shut:
+            found.append(shut)
         if depth >= config.ARCHIVE_MAX_DEPTH:
             if ft.real in ARCHIVES or (ft.real != "pe" and archives.zip_segments(path)):
                 self.too_big.append(f"{name} because archives are nested more than {config.ARCHIVE_MAX_DEPTH} deep")
@@ -159,17 +197,30 @@ class Sweep:
             self.findings.append(f)
 
 
+def unopened(ft, name, scope=None) -> Finding | None:
+    """"Couldn't fully check" for a container Blotter can't open, or None."""
+    exts = filetype.extensions(name or "")
+    if ft.real not in UNOPENED and not (ft.real == "unknown" and exts and exts[-1] in CONTAINER_ENDINGS):
+        return None
+    what = ft.label if ft.real != "unknown" else "this kind of file"
+    return unchecked(ID, f"Blotter can't look inside {what}, so its own checks (lying names, scripts, macros, "
+                         "programs) didn't see the files in it; only the antivirus engines and YARA did. Unpack it "
+                         "with a tool like 7-Zip and drop the files inside on Blotter for the full check.",
+                     {"unopened": ft.real, **({"scope": scope} if scope else {})})
+
+
 def scan(path) -> list[Finding]:
     ft = filetype.detect(path)
     sweep = Sweep(hashing.password(path))
+    shut = unopened(ft, hashing.original_name(path))
     try:
         if not sweep.contents(path, ft, "", 1):
-            return [Finding(ID, SKIPPED, "Not a zip, rar or 7z archive, and no zip is hidden in it, so there was "
-                                         "nothing to unpack.")]
+            return [shut] if shut else [Finding(ID, SKIPPED, "Not a zip, rar or 7z archive, and no zip is hidden "
+                                                             "in it, so there was nothing to unpack.")]
     except Exception as e:  # a damaged archive is a finding, not a crash
         return [Finding(ID, ERROR, f"Blotter couldn't unpack this archive ({type(e).__name__}).",
                         {"error": str(e)[:200]})]
-    return summarize(sweep)
+    return summarize(sweep) + ([shut] if shut else [])
 
 
 def summarize(sweep) -> list[Finding]:
@@ -212,6 +263,13 @@ def summarize(sweep) -> list[Finding]:
                                      f"\"{config.ARCHIVE_PASSWORD}\", so Blotter couldn't look at them ({shown}). "
                                      f"{tried}.",
                            {"locked": sweep.locked, "needs_password": True}, [UNCHECKED]))
+    if sweep.programs:
+        which = "the program inside" if sweep.programs == 1 else f"the {sweep.programs} programs inside"
+        signed = (f" Windows' signature check ran on the first {MAX_SIGNATURES} only."
+                  if sweep.programs > MAX_SIGNATURES else "")
+        out.append(Finding(ID, NOTE, f"capa's deep check didn't look at {which}: it only checks a program dropped on "
+                                     f"Blotter by itself. Drop one on Blotter alone for the full check.{signed}",
+                           {"capa_skipped": sweep.programs}))
     files = "1 file" if sweep.checked == 1 else f"{sweep.checked} files"
     if not out:
         out.append(Finding(ID, CLEAR, f"Blotter unpacked {files} from the archive and checked each one; "

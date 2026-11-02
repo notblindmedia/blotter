@@ -23,8 +23,11 @@ EXE_NAME = "MpCmdRun.exe"
 PLATFORM = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "Microsoft" / "Windows Defender" / "Platform"
 FALLBACK = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Windows Defender" / EXE_NAME
 
+OTHER_ANTIVIRUS = "0x800106ba"  # Defender is switched off, usually because another antivirus took over
 KNOWN_ERRORS = {
-    "0x800106ba": "Microsoft Defender isn't running on this PC (another antivirus may have taken over).",
+    OTHER_ANTIVIRUS: "Microsoft Defender isn't running on this PC (another antivirus may have taken over), so it "
+                     "couldn't scan the file. Set up ClamAV so Blotter has an antivirus engine of its own: run "
+                     "setup.bat again and answer Y to ClamAV.",
     "0x80070005": "Microsoft Defender refused access to the scan.",
 }
 
@@ -115,4 +118,6 @@ def _interpret(code: int, output: str, still_there: bool, scanner: str = "") -> 
     hr = re.search(r"0x[0-9a-fA-F]{8}", output)
     hr = hr.group(0).lower() if hr else None
     text = KNOWN_ERRORS.get(hr) or f"Microsoft Defender couldn't scan the file (exit code {code}{', ' + hr if hr else ''})."
+    if hr == OTHER_ANTIVIRUS:
+        details["other_antivirus"] = True  # app.py's /api/status shows a hint on the page
     return [Finding(ID, ERROR, text, details)]

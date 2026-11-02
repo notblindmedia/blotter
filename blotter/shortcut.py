@@ -15,6 +15,7 @@ from pathlib import Path
 from . import config
 
 NAME = "Blotter.lnk"
+ICON = Path("blotter") / "static" / "blotter.ico"  # Blotter's ink-blot icon, also the page's favicon
 COMMAND = (
     "$ErrorActionPreference = 'Stop'; "
     "$folder = if ($env:BLOTTER_SHORTCUT_FOLDER) { $env:BLOTTER_SHORTCUT_FOLDER } "
@@ -24,6 +25,7 @@ COMMAND = (
     "$s.TargetPath = $env:BLOTTER_SHORTCUT_TARGET; "
     "$s.WorkingDirectory = $env:BLOTTER_SHORTCUT_ROOT; "
     "$s.Description = 'Check a file with Blotter before opening it'; "
+    "if ($env:BLOTTER_SHORTCUT_ICON) { $s.IconLocation = $env:BLOTTER_SHORTCUT_ICON }; "
     "$s.Save(); "
     "Write-Output $path"
 )
@@ -39,7 +41,9 @@ def make(root: Path = config.ROOT, folder: Path | None = None) -> Path:
     target = root / "Start Blotter.bat"
     if not target.is_file():
         raise FileNotFoundError(f"{target} is missing")
+    icon = root / ICON
     env = dict(os.environ, BLOTTER_SHORTCUT_NAME=NAME, BLOTTER_SHORTCUT_TARGET=str(target),
+               BLOTTER_SHORTCUT_ICON=f"{icon},0" if icon.is_file() else "",
                BLOTTER_SHORTCUT_ROOT=str(root), BLOTTER_SHORTCUT_FOLDER=str(folder) if folder else "")
     done = subprocess.run([powershell(), "-NoProfile", "-NonInteractive", "-Command", COMMAND], env=env,
                           capture_output=True, text=True, timeout=60,

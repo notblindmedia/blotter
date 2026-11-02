@@ -9,6 +9,53 @@ echo  This creates a private Python folder (.venv) inside the Blotter folder
 echo  and installs the parts Blotter needs. Nothing else on the PC changes.
 echo.
 
+rem --- 0. A good place for the Blotter folder ---------------------------
+rem Two common traps: Windows' "Extract All" makes a blotter-X.Y.Z folder inside a blotter-X.Y.Z folder, and a
+rem Desktop or Documents folder backed up by OneDrive syncs the thousands of files in .venv. Offer a copy in
+rem %USERPROFILE%\Blotter (never synced) and continue setup there; the old folder can be deleted afterwards.
+set "HERE=%~dp0"
+set "HERE=%HERE:~0,-1%"
+set "TARGET=%USERPROFILE%\Blotter"
+if /i "%HERE%"=="%TARGET%" goto place_ok
+set "WHY="
+if /i not "%HERE:OneDrive=%"=="%HERE%" set "WHY=onedrive"
+for %%A in ("%HERE%") do set "SELF=%%~nxA"
+for %%A in ("%HERE%\..") do for %%B in ("%%~fA") do set "PARENT=%%~nxB"
+if not defined WHY if /i "%SELF:~0,8%"=="blotter-" if /i "%PARENT:~0,8%"=="blotter-" set "WHY=double"
+if not defined WHY goto place_ok
+if "%WHY%"=="onedrive" goto place_onedrive
+echo  This Blotter folder sits inside another Blotter folder, which Windows'
+echo  "Extract All" does. It works, but it is easy to lose track of.
+goto place_offer
+:place_onedrive
+echo  This Blotter folder is inside OneDrive, which would copy the thousands of
+echo  files setup adds to the internet and can later hide them from Blotter.
+:place_offer
+echo  A better place is %TARGET%.
+if exist "%TARGET%" goto place_taken
+choice /c YN /m " Copy Blotter there and continue setup from there"
+if errorlevel 2 goto place_stay
+robocopy "%HERE%" "%TARGET%" /E /XD .venv .git /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto place_failed
+echo.
+echo  Copied. Setup continues in a new window, from %TARGET%.
+echo  When it has finished, you can delete this folder: %HERE%
+start "Blotter setup" "%TARGET%\setup.bat"
+exit /b 0
+:place_taken
+echo  There is already a folder there. If it is Blotter, close this window and
+echo  double-click setup.bat in %TARGET% instead.
+choice /c YN /m " Set up Blotter here anyway"
+if errorlevel 2 exit /b 1
+goto place_ok
+:place_failed
+echo  Copying didn't work, so setup continues here.
+goto place_ok
+:place_stay
+echo  OK, setting up here.
+:place_ok
+echo.
+
 rem --- 1. Find Python 3.12 -----------------------------------------------
 set "PY="
 py -3.12 -c "pass" >nul 2>&1 && set "PY=py -3.12"

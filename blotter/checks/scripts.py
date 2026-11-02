@@ -29,6 +29,10 @@ def judge(ft, name, data, scope=None) -> list[Finding]:
     if ft.real == "lnk":
         found = scripts.analyze_lnk(ID, data, scope)
         return found or [Finding(ID, CLEAR, "The shortcut just opens a program or file, with no hidden command.", s)]
+    if ft.kind == "text" and ext in scripts.HTML_EXTS:
+        found = scripts.analyze_html(ID, scripts.decode(data), scope)
+        return found or [Finding(ID, CLEAR, f"Blotter read the .{ext} file's scripts and found no hidden download "
+                                            "(HTML smuggling) and none of the usual malware tricks.", s)]
     if ft.kind != "text" or ext not in scripts.SCRIPT_EXTS:
         return [Finding(ID, SKIPPED, "Not a script or shortcut, so there was nothing to read here.", s)]
     found = scripts.analyze_text(ID, scripts.decode(data), ext, scope)

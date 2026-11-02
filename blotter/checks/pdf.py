@@ -59,7 +59,8 @@ def _object_streams(data: bytes) -> bytes:
     return b"\n".join(out)
 
 
-def analyze(check, data: bytes, scope=None) -> list[Finding]:
+def analyze(check, data: bytes, scope=None, offset=0) -> list[Finding]:
+    """offset: where the %PDF header starts (filetype.detect accepts it within the first 1024 bytes)."""
     s = {"scope": scope} if scope else {}
     counts, disguised = _names(data)
     over = False
@@ -109,15 +110,21 @@ def analyze(check, data: bytes, scope=None) -> list[Finding]:
     if not out:
         out.append(Finding(check, CLEAR, "Blotter read the PDF's structure: no JavaScript, self-starting actions, "
                                          "program launches or packed-in files.", details))
+    if offset:
+        out.append(hiding(check, "pdf-header-moved",
+            f"Its PDF header isn't at the start of the file ({offset:,} bytes of something else come first). PDF "
+            "readers still open it, but it is a trick to confuse scanners that only look at the start.",
+            {**details, "pdf_offset": offset}))
     return out
 
 
 def scan(path) -> list[Finding]:
-    if filetype.detect(path).real != "pdf":
+    ft = filetype.detect(path)
+    if ft.real != "pdf":
         return [Finding(ID, SKIPPED, "Not a PDF, so there was no PDF structure to read.")]
     with open(path, "rb") as f:
         data = f.read(MAX_READ + 1)
-    found = analyze(ID, data[:MAX_READ])
+    found = analyze(ID, data[:MAX_READ], offset=ft.detail.get("pdf_offset", 0))
     if len(data) > MAX_READ:
         found.append(unchecked(ID, f"Only the first {MAX_READ // 1024 ** 2} MB of this PDF were read."))
     return found

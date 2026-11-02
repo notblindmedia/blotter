@@ -18,17 +18,29 @@ Nothing is installed system-wide except Python.
 
 QUICK START (NEW HERE? READ ONLY THIS PART)
 
-You need: a Windows 10 or 11 PC, an internet connection, about 1 GB of
-free space, and 15 minutes. No Git, no programming.
+You need: a Windows 10 or 11 PC with an Intel or AMD processor (Windows on
+ARM, such as Snapdragon laptops, isn't supported: setup stops there), an
+internet connection, about 1 GB of free space, and 15 minutes. No Git, no
+programming.
 
 1. Download: open https://github.com/notblindmedia/blotter/releases and,
    under the newest release, click "blotter-X.Y.Z.zip". Only use the zip
    from that page.
 2. Unpack: right-click the zip, choose "Extract All...", then "Extract".
-   Open the blotter-X.Y.Z folder that appears.
+   Open the blotter-X.Y.Z folder that appears; inside it is another
+   blotter-X.Y.Z folder, open that one too: it has setup.bat. When the
+   folder is a folder inside a folder like that, or sits on a Desktop or
+   in Documents backed up by OneDrive, setup.bat offers to copy Blotter to
+   your own Blotter folder (C:\Users\<you>\Blotter) and set it up there:
+   say Y.
 3. Set up (once): double-click setup.bat and answer its questions. Not
    sure? Y for Python (if Windows asks to allow it, say yes), S to skip
    the keys, N for ClamAV, Y for the desktop shortcut.
+   Does your PC use another antivirus than Microsoft Defender (Norton,
+   McAfee, Bitdefender, Avast, Kaspersky ...)? Then answer Y for ClamAV:
+   Windows switches Defender off when another antivirus takes over, and
+   without ClamAV Blotter has no antivirus engine, so every answer would
+   be "Couldn't fully check". The page says so when it notices.
 4. Compare: at the end setup.bat shows a check code (3 groups of 4
    letters and numbers). If the person who gave you Blotter sent you one,
    all 12 characters must be the same. If not, stop and ask them.
@@ -70,7 +82,18 @@ the sandbox.
      picture ...), compared with its name. Names that lie are flagged, for
      example a program called holiday-photo.jpg, or invoice.pdf.exe (Windows
      often hides the ".exe", so it looks like a PDF).
-   - Zip, rar and 7z archives are unpacked and every file inside is checked.
+   - Zip, rar and 7z archives are unpacked and every file inside is checked
+     the same way as a file on its own (type, YARA, program, signature,
+     macro, PDF and script checks), except for capa's deep check and the
+     online lookups, which only look at the archive itself (the card says
+     so). A packed program inside without a valid signature makes the
+     answer "Couldn't fully check": alone, capa decides how much packing
+     counts. Windows' signature check runs on the first 10 programs inside.
+   - Containers Blotter can't open (disc and disk images .iso .img .vhd,
+     .cab, .gz and .tar, Windows installers .msi, OneNote .one, compiled
+     help .chm) give "Couldn't fully check": only the antivirus engines and
+     YARA see the files in them. Unpack one with 7-Zip and drop the files
+     on Blotter.
      Locked archives are tried with the password "infected" (what malware
      researchers use); if that doesn't open them, the result asks you for
      the password and checks again. The password is only kept in memory for
@@ -151,7 +174,14 @@ the sandbox.
      objects are tied to which flaw comes from oletools' own list.
    - PDFs: JavaScript, actions that run by themselves when the PDF opens,
      "Launch" actions that start programs, files packed inside, and names
-     disguised to slip past scanners. Read as bytes, never opened.
+     disguised to slip past scanners. Read as bytes, never opened. A PDF
+     whose header comes after other bytes (PDF readers look in the first
+     1024) is still read as a PDF, and the card notes the trick.
+   - Web pages and SVG pictures (.html .htm .mht .svg ...): "HTML
+     smuggling", a page that carries a whole file as encoded text and
+     builds it in the browser as a download, is at least "Unusual" (and
+     "Suspicious" when that file is a program, script, shortcut, disk
+     image or archive). Their scripts get the JavaScript patterns below.
    - Scripts and shortcuts (.ps1 .bat .cmd .vbs .js .hta .wsf .lnk ...):
      download-and-run lines, hidden windows, encoded commands, scrambled
      code, attempts to switch off Microsoft Defender. Web requests that only
@@ -229,7 +259,9 @@ Couldn't fully check
   be unpacked, capa that couldn't analyse a program, an Office, RTF or PDF
   file that couldn't be read. The same when YARA failed, or when no
   antivirus engine could scan the file (Defender and ClamAV both failed, or
-  ClamAV failed in test mode, where Defender isn't used). One engine failing
+  ClamAV failed in test mode, where Defender isn't used). Also for a
+  container Blotter can't open (a disc image, CAB, MSI, OneNote ...) and a
+  packed program inside an archive without a valid signature. One engine failing
   while the other scans, or an online lookup failing, stays a note. The card
   names the check and its error.
   Blotter then never says "No known detections", because what it couldn't
@@ -266,6 +298,10 @@ SETUP (ONCE)
 
 1. Double-click setup.bat. It works in a folder unpacked from a release
    zip; Git isn't needed.
+   - If the folder is in OneDrive, or is a blotter-X.Y.Z folder inside
+     another one (what "Extract All" makes), it offers to copy Blotter to
+     %USERPROFILE%\Blotter and continue there (the .venv folder it makes
+     would otherwise sync to OneDrive). You can delete the old folder then.
    - If Python 3.12 isn't installed, it offers to install it with winget.
    - It makes a private Python folder (.venv) inside the Blotter folder and
      installs exact, checksum-verified, ready-made versions of the parts
@@ -275,7 +311,8 @@ SETUP (ONCE)
    - It offers the API keys: Y to paste them (they aren't shown while you
      paste; just Enter skips one), S to skip.
    - It asks whether to set up ClamAV (about 225 MB once, plus about 110 MB
-     of signatures). Say N to skip; you can run setup.bat again later.
+     of signatures). Say N to skip; you can run setup.bat again later. If
+     your PC uses another antivirus than Microsoft Defender, say Y.
    - It offers a desktop shortcut to "Start Blotter.bat" (Y or N). The
      shortcut only opens Blotter when you double-click it.
    - It shows the check code of Blotter's two signing keys (see UPDATES
@@ -398,8 +435,9 @@ USING IT
 
 Quota: a free VirusTotal key allows 4 lookups a minute and 500 a day.
 Blotter waits for a free slot rather than going over. Online answers are
-remembered, so checking the same file again costs nothing. "Check again
-online" (under Details) asks afresh.
+remembered for 7 days, so checking the same file again costs nothing; after
+that Blotter asks again (a file nobody flagged last week can be flagged
+today). "Check again online" (under Details) asks afresh at any time.
 
 
 SETTINGS

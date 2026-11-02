@@ -69,6 +69,8 @@ function showStatus(s) {
   $("eicar").hidden = testMode;
   $("eicar-off").hidden = !testMode;
   $("restart").hidden = !s.restart_needed;
+  // Defender off (another antivirus took over) and no ClamAV: every answer is "Couldn't fully check".
+  $("defender-off").hidden = !s.defender_off || (s.clamav.enabled && s.clamav.installed);
   showKeyState(s.keys);
   $("clamav-on").checked = s.settings.clamav;
   const c = s.clamav;

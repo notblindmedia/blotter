@@ -23,7 +23,7 @@ from .trust import TrustList
 STATIC = Path(__file__).parent / "static"
 CODE = Path(__file__).parent
 TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
-         ".html": "text/html; charset=utf-8"}
+         ".html": "text/html; charset=utf-8", ".ico": "image/x-icon"}
 
 
 def code_fingerprint() -> str:
@@ -138,6 +138,7 @@ def create_app(checks=None, cache=None, trust=None, token=None, test_mode=False)
             "key_store_ok": keys.backend_ok(),
             "settings": settings.load(),
             "defender": str(scanner) if scanner else None,
+            "defender_off": runner.defender_off(),
             "clamav": clamav.service.status(),
             "sandbox": {"mode": sandbox.mode(), "why": sandbox.public_state().get("why", "")},
             "rules": {

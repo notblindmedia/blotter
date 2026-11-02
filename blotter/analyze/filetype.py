@@ -14,8 +14,8 @@ FAMILIES = {
     "script": "ps1 psm1 psd1 bat cmd vbs vbe js jse wsf wsh hta reg scf url py sh".split(),
     "shortcut": ["lnk"],
     "document": ("pdf doc docx docm dot dotx dotm xls xlsx xlsm xlsb xlt xltm ppt pptx pptm pps ppsx "
-                 "rtf odt ods odp txt csv md log ini json xml epub").split(),
-    "archive": "zip rar 7z gz tgz tar cab iso img jar apk xpi vsix nupkg whl".split(),
+                 "rtf odt ods odp txt csv md log ini json xml epub one").split(),
+    "archive": "zip rar 7z gz tgz tar cab iso img vhd vhdx jar apk xpi vsix nupkg whl".split(),
     "image": "jpg jpeg png gif bmp ico webp tif tiff heic svg".split(),
     "media": "mp3 mp4 mkv avi mov wav flac ogg m4a webm wmv".split(),
 }
@@ -38,6 +38,8 @@ EXPECTED = {
     "zip": COMPATIBLE["zip"], "ooxml": COMPATIBLE["zip"], "odf": COMPATIBLE["zip"], "jar": COMPATIBLE["zip"],
     "ole": COMPATIBLE["ole"], "text": COMPATIBLE["text"], "lnk": {"lnk"}, "rtf": {"rtf", "doc"},
     "pdf": {"pdf"}, "rar": {"rar"}, "7z": {"7z"}, "gzip": {"gz", "tgz"}, "cab": {"cab"}, "chm": set(),
+    "iso": {"iso", "img"}, "vhd": {"vhd", "vhdx"}, "tar": {"tar"}, "onenote": {"one"},
+    "msi": {"msi", "msp", "msm", "mst"},
     "java": set(), "png": {"png"}, "jpeg": {"jpg", "jpeg"}, "gif": {"gif"}, "bmp": {"bmp"}, "ico": {"ico"},
     "mp3": {"mp3"}, "flac": {"flac"}, "ogg": {"ogg"}, "mkv": {"mkv", "webm"}, "riff": {"webp", "avi", "wav"},
     "mp4": {"mp4", "mov", "m4a"},
@@ -104,6 +106,7 @@ def zip_type(source) -> "FileType":
     return FileType(kind, label, real, detail)
 
 
+MAGIC_OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 MAGIC = [
     (b"%PDF", "pdf", "document", "a PDF document"),
     (b"Rar!\x1a\x07", "rar", "archive", "a RAR archive"),
@@ -128,7 +131,16 @@ MAGIC = [
     (b"fLaC", "flac", "media", "a FLAC audio file"),
     (b"OggS", "ogg", "media", "an OGG audio or video file"),
     (b"\x1a\x45\xdf\xa3", "mkv", "media", "a Matroska or WebM video"),
+    (b"vhdxfile", "vhd", "archive", "a virtual hard disk (VHD)"),
+    (b"conectix", "vhd", "archive", "a virtual hard disk (VHD)"),
+    (bytes.fromhex("e4525c7b8cd8a74daeb15378d02996d3"), "onenote", "document", "a OneNote notebook section"),
 ]
+# Windows Installer packages are OLE files; their root entry's class ID says so (MSI and merge module, patch,
+# transform).
+MSI_CLASSES = {bytes.fromhex(h) for h in ("84100c0000000000c000000000000046", "86100c0000000000c000000000000046",
+                                          "82100c0000000000c000000000000046")}
+# Where a CD/DVD image (ISO 9660 or UDF) names its format: one of these 5-byte tags at 0x8001, 0x8801 or 0x9001.
+DISC_TAGS = (b"CD001", b"BEA01", b"NSR02", b"NSR03")
 
 
 def _is_text(head: bytes) -> bool:
@@ -146,9 +158,29 @@ def _is_text(head: bytes) -> bool:
         return sum(32 <= b < 127 or b in (9, 10, 13) for b in sample) / len(sample) > 0.95
 
 
+def _ole_class(f, head: bytes) -> bytes:
+    """The class ID of an OLE file's root entry (the first directory entry), or b"" when it can't be read."""
+    if len(head) < 0x34:
+        return b""
+    shift, first_dir = struct.unpack_from("<H", head, 0x1E)[0], struct.unpack_from("<I", head, 0x30)[0]
+    if shift not in (9, 12) or first_dir >= 0xFFFFFFFA:
+        return b""
+    f.seek(((first_dir + 1) << shift) + 0x50)
+    return f.read(16)
+
+
+PDF_HEADER = re.compile(rb"%PDF-\d\.\d")
+PDF_SEARCH = 1024  # Adobe Reader accepts the header anywhere in the first 1024 bytes
+
+
 def detect(path) -> FileType:
     with open(path, "rb") as f:
         head = f.read(HEAD)
+        msi = head.startswith(MAGIC_OLE) and _ole_class(f, head) in MSI_CLASSES
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - 512))
+        tail = f.read(512) if size >= 1024 else b""
     if head.startswith(b"MZ"):
         pe = _pe(head)
         if pe:
@@ -156,9 +188,23 @@ def detect(path) -> FileType:
         return FileType("program", "an old DOS program (MZ)", "mz", {})
     if head.startswith(b"PK\x03\x04") or head.startswith(b"PK\x05\x06"):
         return zip_type(path)
+    if msi:
+        return FileType("program", "a Windows installer package (MSI)", "msi", {})
     for magic, real, kind, label in MAGIC:
         if head.startswith(magic):
             return FileType(kind, label, real, {})
+    if any(head[at:at + 5] in DISC_TAGS for at in (0x8001, 0x8801, 0x9001)):
+        return FileType("archive", "a disc image (ISO)", "iso", {})
+    if tail.startswith(b"conectix"):  # a fixed-size VHD keeps its footer at the end only
+        return FileType("archive", "a virtual hard disk (VHD)", "vhd", {})
+    if head[257:262] == b"ustar":
+        return FileType("archive", "a TAR archive", "tar", {})
+    pdf = PDF_HEADER.search(head[:PDF_SEARCH + 8])
+    if pdf and pdf.start() <= PDF_SEARCH:
+        return FileType("document", "a PDF document", "pdf", {"pdf_offset": pdf.start()})
+    rtf = head.lstrip(b" \t\r\n")
+    if rtf.startswith(b"{\\rt") and len(head) - len(rtf) <= PDF_SEARCH:
+        return FileType("document", "a rich-text document (RTF)", "rtf", {"rtf_offset": len(head) - len(rtf)})
     if head[8:12] in (b"WEBP", b"AVI ", b"WAVE") and head.startswith(b"RIFF"):
         kind = "image" if head[8:12] == b"WEBP" else "media"
         return FileType(kind, "a WebP picture" if kind == "image" else "an audio or video file", "riff", {})

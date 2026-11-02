@@ -10,12 +10,15 @@ request.json there ({"module", "path", "name", "sha256", "password"}), starts
     python -I -B -c BOOT <request.json>
 and reads result.json ({"findings": [...]} or {"error": "..."}). -I (isolated mode) keeps Python from
 loading anything from the current folder or user settings; -B stops it writing cache files.
+Programs the archive check found inside an archive wait in the work folder as sign/<n>.exe for Windows'
+signature check, which can't run inside the sandbox; sign_inside() runs it here, reading them only.
 The work folder, with the request in it, is deleted afterwards.
 """
 
 import importlib
 import json
 import os
+import re
 import shutil
 import site
 import sys
@@ -24,7 +27,7 @@ import uuid
 from pathlib import Path
 
 from . import config, procs, sandbox
-from .findings import LEVELS, Finding
+from .findings import LEVELS, NOTE, Finding
 
 PREFIX = "blotter.checks."
 # Where Blotter's code and packages are. Worked out once in Blotter itself and handed down
@@ -34,6 +37,8 @@ if os.environ.get("BLOTTER_PATHS"):
 else:
     PATHS = [str(config.ROOT), *(p for p in site.getsitepackages() if p.lower().endswith("site-packages"))]
 BOOT = f"import sys; sys.path[:0] = {PATHS!r}; import blotter.worker as w; w.main()"
+SIGN_TIME = 60  # seconds for the signature checks of programs inside an archive, after the worker is done
+_SIGN_NAME = re.compile(r"sign/\d{1,3}\.exe")
 
 
 def command(request_file=None, sandboxed=False) -> list[str]:
@@ -88,9 +93,36 @@ def run(module: str, path, name, sha256, timeout: float, sandboxed=True, passwor
         answer = json.loads(result.read_text(encoding="utf-8"))
         if "error" in answer:
             raise RuntimeError(answer["error"])
-        return [Finding.from_dict(d) for d in answer["findings"]]
+        findings = [Finding.from_dict(d) for d in answer["findings"]]
+        return sign_inside(findings, workdir, cancel)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+def sign_inside(findings, workdir: Path, cancel=None) -> list[Finding]:
+    """Replace each "sign_later" finding with Windows' signature check of that copy. The worker named the copy, so
+    only a plain file sign/<n>.exe directly in this work folder is checked; anything else stays unchecked."""
+    from .analyze import program
+    out = []
+    deadline = time.monotonic() + SIGN_TIME
+    folder = (workdir / "sign").resolve()
+    for f in findings:
+        rel = f.details.get("sign_later")
+        if not rel:
+            out.append(f)
+            continue
+        scope = str(f.details.get("scope") or "")
+        copy = workdir / str(rel)
+        ok = (isinstance(rel, str) and _SIGN_NAME.fullmatch(rel) and not copy.is_symlink() and copy.is_file()
+              and copy.resolve().parent == folder)
+        if not ok or time.monotonic() > deadline or (cancel is not None and cancel.is_set()):
+            out.append(Finding(f.check, NOTE, f"Inside the archive, {scope}: Windows couldn't check its signature "
+                                              "this time.", {"scope": scope}))
+            continue
+        for found in program.signature_findings(f.check, copy, {"scope": scope}):
+            found.text = f"Inside the archive, {scope}: {found.text}"
+            out.append(found)
+    return out
 
 
 def main() -> None:

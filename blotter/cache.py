@@ -1,4 +1,5 @@
-"""SQLite cache of online lookups by SHA-256, so a rescan costs no API quota."""
+"""SQLite cache of online lookups by SHA-256, so a rescan costs no API quota. Answers older than
+config.ONLINE_MAX_AGE are asked again (the old row stays until the new answer replaces it)."""
 
 import json
 import sqlite3
@@ -22,14 +23,14 @@ class Cache:
                 " PRIMARY KEY (sha256, check_id))"
             )
 
-    def get(self, sha256: str, check_id: str):
-        """Return (findings, checked_at) or None."""
+    def get(self, sha256: str, check_id: str, max_age=None):
+        """Return (findings, checked_at), or None when there is none or it is older than max_age seconds."""
         with self._lock:
             row = self._db.execute(
                 "SELECT findings, checked_at FROM results WHERE sha256 = ? AND check_id = ?",
                 (sha256, check_id),
             ).fetchone()
-        if not row:
+        if not row or (max_age is not None and time.time() - row[1] > max_age):
             return None
         try:
             return [Finding.from_dict(d) for d in json.loads(row[0])], row[1]

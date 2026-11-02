@@ -36,6 +36,10 @@ KEYRING_SERVICE = os.environ.get("BLOTTER_KEYRING_SERVICE", "Blotter")
 
 MAX_UPLOAD = 2 * 1024 ** 3  # 2 GB
 
+# Remembered online answers (VirusTotal, MalwareBazaar, CIRCL) are asked again after this long: a file nobody
+# flagged last week can be flagged today.
+ONLINE_MAX_AGE = 7 * 24 * 3600
+
 # Archives: limits against "zip bombs" (archives that unpack to something enormous).
 ARCHIVE_MAX_TOTAL = 500 * 1024 ** 2   # unpacked size of everything inside
 ARCHIVE_MAX_MEMBERS = 1000            # files inside

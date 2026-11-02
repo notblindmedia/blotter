@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Blotter</title>
+<link rel="icon" href="/static/blotter.ico">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
 </head>
@@ -16,6 +17,10 @@
 <main>
   <p id="restart" class="restart" role="alert" hidden>Blotter was updated while it was running. Close its black
     window and double-click <b>Start Blotter.bat</b> again, so the newest checks are used.</p>
+  <p id="defender-off" class="restart" role="alert" hidden>Microsoft Defender is switched off on this PC (another
+    antivirus, such as Norton or McAfee, has taken over), so Blotter can't use it and its answers say
+    "Couldn't fully check". Set up ClamAV instead: close Blotter's black window, double-click <b>setup.bat</b>
+    and answer <b>Y</b> to ClamAV. If ClamAV is set up already, switch it on under Settings.</p>
   <section id="settings" class="panel" hidden>
     <div id="welcome" hidden>
       <h2>Welcome to Blotter</h2>
