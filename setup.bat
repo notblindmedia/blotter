@@ -85,15 +85,22 @@ if errorlevel 2 goto done
 
 :done
 
-rem --- 7. The signing keys' fingerprints ----------------------------------
+rem --- 7. Desktop shortcut (optional; it only opens Blotter when double-clicked) ---
 echo.
-echo  Blotter's signing keys. update.bat only installs releases signed with the
-echo  release key. If the person who gave you Blotter sent you these numbers,
-echo  check they are exactly the same:
+choice /c YN /m " Put a Blotter shortcut on your desktop"
+if errorlevel 2 goto shortcut_done
+".venv\Scripts\python.exe" -m blotter.shortcut
+:shortcut_done
+
+rem --- 8. The check code of Blotter's signing keys ------------------------
+echo.
+echo  If the person who gave you Blotter sent you a check code, compare it with
+echo  this one. All 12 characters must be the same; if not, stop and ask them.
 ".venv\Scripts\python.exe" -m blotter.signing
 
 echo.
-echo  Setup finished. Double-click "Start Blotter.bat" to use Blotter.
+echo  Setup finished. Double-click the Blotter shortcut (or "Start Blotter.bat")
+echo  to use Blotter.
 echo  To get a newer version later, double-click update.bat.
 echo.
 pause

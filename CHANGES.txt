@@ -14,4 +14,5 @@ one "- " line per change. "next" collects changes until the next release.
 - The intel pack: signed lists (for now the stolen certificates) that
   Blotter fetches between releases. Data only, never code.
 - setup.bat works from a downloaded zip (no Git), offers the API keys
-  (or Skip), and shows the signing keys' fingerprints.
+  (or Skip) and a desktop shortcut, and shows one short check code for
+  the signing keys. README.txt starts with a 5-step quick start.

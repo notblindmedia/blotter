@@ -21,52 +21,29 @@ QUICK START (NEW HERE? READ ONLY THIS PART)
 You need: a Windows 10 or 11 PC, an internet connection, about 1 GB of
 free space, and 15 minutes. No Git, no programming.
 
-1. Get Blotter.
-   Open https://github.com/notblindmedia/blotter/releases in your browser.
-   Under the newest release, click "blotter-X.Y.Z.zip" (X.Y.Z is the
-   version number) to download it. Only use the zip from that page.
+1. Download: open https://github.com/notblindmedia/blotter/releases and,
+   under the newest release, click "blotter-X.Y.Z.zip". Only use the zip
+   from that page.
+2. Unpack: right-click the zip, choose "Extract All...", then "Extract".
+   Open the blotter-X.Y.Z folder that appears.
+3. Set up (once): double-click setup.bat and answer its questions. Not
+   sure? Y for Python (if Windows asks to allow it, say yes), S to skip
+   the keys, N for ClamAV, Y for the desktop shortcut.
+4. Compare: at the end setup.bat shows a check code (3 groups of 4
+   letters and numbers). If the person who gave you Blotter sent you one,
+   all 12 characters must be the same. If not, stop and ask them.
+5. Use it: double-click the Blotter shortcut on your desktop (or "Start
+   Blotter.bat" in the folder), drop a file on the page that opens in
+   your browser and read the answer. Keep the black window open while
+   you use Blotter.
 
-2. Unpack it.
-   Right-click the downloaded zip, choose "Extract All...", pick a place
-   you will find again (for example your Documents folder), click
-   "Extract". You get a folder called blotter-X.Y.Z. Open it.
-
-3. Set it up (once).
-   Double-click setup.bat. A black window opens and asks a few questions:
-   - "Install Python 3.12 now?" (only if it is missing): press Y.
-     If Windows asks whether to allow it, say yes.
-   - "Add keys now (Y) or skip (S)": press S if you are not sure. The keys
-     are optional and free; see SETUP (ONCE) below if you want them.
-   - "Set up ClamAV now?": Y gives you a second antivirus engine (it needs
-     about 350 MB and some memory while Blotter runs). N is fine too.
-   At the end it shows two "fingerprints" (8 groups of 4 letters and
-   numbers). If the person who gave you Blotter sent you fingerprints,
-   compare them: every character must be the same. If they differ, stop
-   and ask them before using Blotter.
-   Then press a key to close the window.
-   Windows may warn that the file came from the internet. Check that the
-   warning names setup.bat in your blotter-X.Y.Z folder, then choose
-   "Run" (on a blue "Windows protected your PC" box: "More info", then
-   "Run anyway"). Do that only for the files in this folder.
-
-4. Use it.
-   Double-click "Start Blotter.bat". Your browser opens Blotter. Drop a
-   file on the page and read the answer. Keep the black window open while
-   you use Blotter; close it when you are done.
-
-5. Keep it up to date.
-   Now and then, close Blotter and double-click update.bat. It looks for a
-   newer version, shows what changed and asks before installing. It only
-   installs versions signed with Blotter's release key, never an older
-   one, and never anything without asking. Your settings, keys and
-   trusted files stay. (A list you edited yourself in the rules folder is
-   replaced by the new version's.)
-   The rules (YARA Forge, weekly) and the intel pack (lists of stolen
-   certificates, daily) refresh when Blotter starts and they are due;
-   those are data, not programs, and are checked before use.
-
+Windows warns that setup.bat came from the internet? Check the warning
+names setup.bat in your blotter-X.Y.Z folder, then click "More info" and
+"Run anyway". Do that only for the files in this folder.
 Something went wrong? The black window says what. Run setup.bat again;
 it repairs what is missing and keeps what works.
+Newer versions: now and then, close Blotter and double-click update.bat
+(see UPDATES AND SIGNATURES).
 
 
 WHAT BLOTTER DOES WITH YOUR FILE
@@ -299,7 +276,9 @@ SETUP (ONCE)
      paste; just Enter skips one), S to skip.
    - It asks whether to set up ClamAV (about 225 MB once, plus about 110 MB
      of signatures). Say N to skip; you can run setup.bat again later.
-   - It shows the fingerprints of Blotter's two signing keys (see UPDATES
+   - It offers a desktop shortcut to "Start Blotter.bat" (Y or N). The
+     shortcut only opens Blotter when you double-click it.
+   - It shows the check code of Blotter's two signing keys (see UPDATES
      AND SIGNATURES).
 
 2. API keys are optional. Blotter works without them; only the VirusTotal
@@ -334,11 +313,18 @@ you say yes. It never updates its code by itself.
   line by line (for now the stolen-certificate list), never an older pack
   than the one it has, and never code. A pack that fails a check is
   refused and the lists you have stay.
-- Fingerprints: setup.bat shows both keys' fingerprints (8 groups of 4).
-  Compare them with the ones the person who gave you Blotter sent you.
-  Honest limit: if your first download was itself tampered with, it could
-  print false fingerprints; comparing protects you best when the
-  fingerprints reach you another way (a message from that person).
+- Check code: setup.bat shows one short code (3 groups of 4) made from
+  both keys; swapping either key changes it. Compare it with the one the
+  person who gave you Blotter sent you. Honest limit: if your first
+  download was itself tampered with, it could print a false code;
+  comparing protects you best when the code reaches you another way (a
+  message from that person). Each key's full fingerprint (8 groups of 4):
+  .venv\Scripts\python -m blotter.signing --fingerprints
+- update.bat keeps your settings, keys and trusted files. A list you
+  edited yourself in the rules folder is replaced by the new version's.
+- The rules (YARA Forge, weekly) and the intel pack (daily) refresh when
+  Blotter starts and they are due. Those are data, not programs, and are
+  checked before use.
 
 
 USING IT

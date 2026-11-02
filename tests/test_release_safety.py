@@ -21,7 +21,7 @@ from unittest import mock
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import blotter
-from blotter import config, intel, keysetup, selfupdate, signing
+from blotter import config, intel, keysetup, selfupdate, shortcut, signing
 from blotter.analyze import program
 from blotter.checks import signature as signature_check
 from blotter.findings import SIGNED, SUSPICIOUS
@@ -95,7 +95,20 @@ class SigningTests(unittest.TestCase):
         self.assertNotEqual(signing.CODE_KEY, signing.PACK_KEY, "one key, one job")
         self.assertNotEqual(signing.RELEASE, signing.PACK)
         with mock.patch.object(signing, "CODE_KEY", ""):
-            self.assertIn("not built into this copy yet", signing.describe()[0])
+            self.assertIn("isn't built into this copy yet", signing.describe()[0])
+            self.assertIn("Release key (code): not built into this copy yet", signing.describe(fingerprints=True))
+
+    def test_check_code_is_short_readable_and_covers_both_keys(self):
+        self.assertEqual(signing.check_code(), "Y40R-ZXV1-ZANH")  # what friends compare; changes only with a key
+        self.assertEqual(signing.describe(), ["Check code: Y40R-ZXV1-ZANH"])
+        _, other = new_key()
+        codes = {signing.check_code(), signing.check_code(code_key=other), signing.check_code(pack_key=other),
+                 signing.check_code(other, signing.CODE_KEY)}
+        self.assertEqual(len(codes), 4, "swapping either key (or the two) changes the code")
+        for code in codes:
+            self.assertRegex(code, r"^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$")
+        self.assertFalse(set("ILOU") & set(signing.CHECK_LETTERS))
+        self.assertEqual(len(set(signing.CHECK_LETTERS)), 32)
 
     def test_the_signing_kit_signs_what_blotter_checks(self):
         self.assertEqual(sign_release.RELEASE, signing.RELEASE)
@@ -574,6 +587,53 @@ class KeySetupTests(unittest.TestCase):
             keysetup.run(ask=lambda _: "")
         put.assert_not_called()
         update.assert_not_called()
+
+
+# ---- the friend's first install: shortcut, check code, quick start ----
+
+@unittest.skipUnless(sys.platform == "win32", "Windows shortcuts")
+class ShortcutTests(unittest.TestCase):
+    def test_makes_a_shortcut_to_start_blotter_even_with_odd_folder_names(self):
+        base = Path(tempfile.mkdtemp())
+        root = base / "it's $(blotter) & co"
+        desktop = base / "desk 'top' $env;x"
+        root.mkdir()
+        desktop.mkdir()
+        (root / "Start Blotter.bat").write_text("@echo off\r\n")
+        path = shortcut.make(root, desktop)
+        self.assertEqual(path, desktop / "Blotter.lnk")
+        read = subprocess.run(
+            [shortcut.powershell(), "-NoProfile", "-NonInteractive", "-Command",
+             "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); "
+             "Write-Output $s.TargetPath; Write-Output $s.WorkingDirectory"],
+            env=dict(os.environ, LNK=str(path)), capture_output=True, text=True, timeout=60)
+        self.assertEqual(read.stdout.strip().splitlines(), [str(root / "Start Blotter.bat"), str(root)])
+        self.assertEqual(shortcut.make(root, desktop), path)  # setup.bat run again: replaced, no error
+
+    def test_missing_start_file_makes_nothing(self):
+        base = Path(tempfile.mkdtemp())
+        with self.assertRaises(FileNotFoundError):
+            shortcut.make(base, base)
+        self.assertFalse((base / "Blotter.lnk").exists())
+
+
+class FirstInstallTextTests(unittest.TestCase):
+    def test_setup_offers_the_shortcut_and_shows_only_the_check_code(self):
+        bat = (ROOT / "setup.bat").read_text(encoding="utf-8")
+        self.assertIn('choice /c YN /m " Put a Blotter shortcut on your desktop"', bat)
+        self.assertIn("-m blotter.shortcut", bat)
+        self.assertIn("-m blotter.signing\r\n", (ROOT / "setup.bat").read_bytes().decode("utf-8"))
+        self.assertNotIn("--fingerprints", bat)
+        self.assertNotIn("fingerprint", bat.lower())
+
+    def test_quick_start_has_at_most_five_steps(self):
+        readme = (ROOT / "README.txt").read_text(encoding="utf-8")
+        quick = readme.split("QUICK START")[1].split("\n\n\n")[0]
+        steps = re.findall(r"^(\d+)\. ", quick, re.M)
+        self.assertEqual(steps, ["1", "2", "3", "4", "5"])
+        self.assertIn("check code", quick)
+        self.assertIn("shortcut", quick)
+        self.assertNotIn("fingerprint", quick)
 
 
 if __name__ == "__main__":
